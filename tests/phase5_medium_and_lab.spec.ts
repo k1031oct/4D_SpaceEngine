@@ -285,12 +285,13 @@ describe('空間媒質（真空・気体・水）および統合実験場（全�
     expect(distParallel).toBeLessThan(distAntiParallel);
   });
 
-  it('相転移テスト: 加熱により固体→液体→気体へ遷移し、気化時の低密度化による浮力で自動上昇し、冷却で再凝固すること', () => {
+  it('相転移テスト: 加熱により固体→液体→気体へ遷移し、気化時は集合体が分散粒子へ分裂して上昇し、冷却で再凝固すること', () => {
     const vm = new SandboxViewModel();
     vm.loadPreset('sandbox_lab');
     vm.setMedium('air');
 
     const ice = vm.repository.entities.find((e) => e.id === 'lab_ice')!;
+    const initMass = ice.mass;
     vm.grabEntity(ice.id);
     vm.releaseEntity(ice.id);
 
@@ -304,20 +305,69 @@ describe('空間媒質（真空・気体・水）および統合実験場（全�
     vm.step(1 / 60);
     expect(ice.phaseState).toBe('liquid');
 
-    // 3. 沸点以上に加熱：気体（水蒸気）へ気化し、密度低下による浮力で大気中を上昇
+    // 3. 沸点以上に加熱：気体（水蒸気）へ気化し、集合体が4つの低密度サブ粒子へ分裂・分散して上昇
     vm.addHeatToSelected(4.0);
     for (let i = 0; i < 30; i++) {
       vm.step(1 / 60);
     }
-    expect(ice.phaseState).toBe('gas');
-    expect(ice.position[1]).toBeGreaterThan(solidY + 0.15);
+    const vaporParticles = vm.repository.entities.filter((e) => e.id.startsWith('lab_ice_vapor_'));
+    expect(vaporParticles.length).toBe(4);
+    const totalVaporMass = vaporParticles.reduce((s, p) => s + p.mass, 0);
+    expect(totalVaporMass).toBeCloseTo(initMass, 5); // 質量保存則
+    expect(vaporParticles[0].phaseState).toBe('gas');
+    expect(vaporParticles[0].position[1]).toBeGreaterThan(solidY + 0.15);
 
-    // 4. 冷却：再び固体に戻り重力で下向きに落下し始めること
-    vm.addHeatToSelected(-10.0);
+    // 4. 冷却：すべての分散粒子が再び固体に戻り重力で下向きに落下し始めること
+    for (const p of vaporParticles) {
+      p.internalHeat = 0.0;
+    }
     for (let i = 0; i < 45; i++) {
       vm.step(1 / 60);
     }
-    expect(ice.phaseState).toBe('solid');
-    expect(ice.velocity[1]).toBeLessThan(0);
+    expect(vaporParticles[0].phaseState).toBe('solid');
+    expect(vaporParticles[0].velocity[1]).toBeLessThan(0);
+  });
+
+  it('磁石静止テスト: ネオジム磁石と鉄球が吸着した後に永遠に動き続けず完全静止すること', () => {
+    const repo = new SpaceStateRepository(createDefaultCoreConfig());
+    repo.loadPreset('magnet_attraction');
+    const core = new SpaceEngineCore(repo.config);
+
+    // 5秒間 (300ステップ) 実行
+    for (let i = 0; i < 300; i++) {
+      core.step(repo.entities, repo.materials, repo.externalSources, 1 / 60);
+    }
+
+    const magnet = repo.entities.find((e) => e.id === 'magnet')!;
+    const iron = repo.entities.find((e) => e.id === 'iron_sphere')!;
+    expect(magnet.isSleeping).toBe(true);
+    expect(iron.isSleeping).toBe(true);
+    expect(magnet.velocity).toEqual([0, 0, 0]);
+    expect(iron.velocity).toEqual([0, 0, 0]);
+  });
+
+  it('燃焼テスト: 大気中で可燃物(紙片)が発火点を超えると酸化反応で燃焼・発熱し、無酸素環境で鎮火すること', () => {
+    const vm = new SandboxViewModel();
+    vm.loadPreset('sandbox_lab');
+    vm.setMedium('air');
+
+    const paper = vm.repository.entities.find((e) => e.id === 'lab_paper')!;
+    vm.grabEntity(paper.id);
+    vm.releaseEntity(paper.id);
+
+    // 紙片の発火点 (1.5) 以上に加熱
+    vm.addHeatToSelected(1.8);
+    const heatBefore = paper.internalHeat;
+    for (let i = 0; i < 15; i++) {
+      vm.step(1 / 60);
+    }
+    expect(paper.isBurning).toBe(true);
+    // 酸化還元反応により自己発熱で熱量が増加していること
+    expect(paper.internalHeat).toBeGreaterThan(heatBefore);
+
+    // 真空（酸素 0）へ切り替えると即座に鎮火すること
+    vm.setMedium('vacuum');
+    vm.step(1 / 60);
+    expect(paper.isBurning).toBe(false);
   });
 });

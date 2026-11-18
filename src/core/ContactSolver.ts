@@ -50,25 +50,29 @@ export class ContactSolver {
         if (invMSum > 0) {
           // 位置補正（Position-Based）
           const corr = overlap / invMSum;
+          const significantOverlap = overlap > 2e-3;
           if (!a.isGrabbed && !a.isGrounded) {
             a.position[0] -= nx * corr * invMa;
             a.position[1] -= ny * corr * invMa;
             a.position[2] -= nz * corr * invMa;
-            a.isSleeping = false;
+            if (significantOverlap) a.isSleeping = false;
           }
           if (!b.isGrabbed && !b.isGrounded) {
             b.position[0] += nx * corr * invMb;
             b.position[1] += ny * corr * invMb;
             b.position[2] += nz * corr * invMb;
-            b.isSleeping = false;
+            if (significantOverlap) b.isSleeping = false;
           }
 
+          const isMagneticAdhesion =
+            (matA?.magneticSusceptibility ?? 0) > 0.5 && (matB?.magneticSusceptibility ?? 0) > 0.5;
+          const isElectrostaticAdhesion =
+            (Math.abs(a.netCharge) > 0.5 && (matB?.polarizability ?? 0) > 0.7) ||
+            (Math.abs(b.netCharge) > 0.5 && (matA?.polarizability ?? 0) > 0.7);
+
           if (velAlongNormal < 0) {
-            const isElectrostaticAdhesion =
-              (Math.abs(a.netCharge) > 0.5 && (matB?.polarizability ?? 0) > 0.7) ||
-              (Math.abs(b.netCharge) > 0.5 && (matA?.polarizability ?? 0) > 0.7);
             const e =
-              isElectrostaticAdhesion || Math.abs(velAlongNormal) < 0.2
+              isMagneticAdhesion || isElectrostaticAdhesion || Math.abs(velAlongNormal) < 0.2
                 ? 0.0
                 : Math.min(matA?.restitution ?? 0.2, matB?.restitution ?? 0.2);
 
@@ -82,6 +86,31 @@ export class ContactSolver {
               b.velocity[0] += jImp * invMb * nx;
               b.velocity[1] += jImp * invMb * ny;
               b.velocity[2] += jImp * invMb * nz;
+            }
+          }
+
+          // 磁気・静電吸着時は減衰を強め、低速になったら双方を吸着静止ロックする
+          if (isMagneticAdhesion || isElectrostaticAdhesion) {
+            const relSpeedSq = rvx * rvx + rvy * rvy + rvz * rvz;
+            const lockThresh = config.sleepVelocityThreshold * 2.5;
+            if (relSpeedSq < lockThresh * lockThresh) {
+              if (!a.isGrabbed && !a.isGrounded) {
+                a.velocity = [0, 0, 0];
+                a.isSleeping = true;
+              }
+              if (!b.isGrabbed && !b.isGrounded) {
+                b.velocity = [0, 0, 0];
+                b.isSleeping = true;
+              }
+            } else {
+              if (!a.isGrabbed && !a.isGrounded) {
+                a.velocity[0] *= 0.65;
+                a.velocity[2] *= 0.65;
+              }
+              if (!b.isGrabbed && !b.isGrounded) {
+                b.velocity[0] *= 0.65;
+                b.velocity[2] *= 0.65;
+              }
             }
           }
         }
@@ -115,7 +144,7 @@ export class ContactSolver {
       if (Number.isFinite(floorY)) {
         const bottomY = ent.position[1] - halfH;
 
-        if (bottomY <= floorY + 1e-4) {
+        if (bottomY <= floorY + 2e-3) {
           ent.position[1] = floorY + halfH;
 
           // 垂直方向のマイクロバウンス抑制

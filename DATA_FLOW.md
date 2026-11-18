@@ -75,6 +75,9 @@ SpaceEntity
   ├─ magneticMoment: [number, number, number] (磁気双極子 m)
   ├─ internalHeat: number       (内部熱エネルギー)
   ├─ phaseState: "solid" | "liquid" | "gas" (相状態：internalHeat と bindingEnergy の比から遷移)
+  ├─ isBurning?: boolean        (酸化還元による燃焼中フラグ)
+  ├─ fuelRemaining?: number     (可燃残量 0..1)
+  ├─ isVaporParticle?: boolean  (気化分散によって生成されたサブ粒子フラグ)
   ├─ isGrounded: boolean        (アース接続・巨大導体フラグ)
   ├─ isGrabbed: boolean         (ユーザー操作中フラグ)
   ├─ isSleeping: boolean        (静止摩擦ロック状態フラグ)
@@ -91,6 +94,7 @@ AmbientMediumSpec
   ├─ viscosity: number          (粘性率：速度減衰)
   ├─ permittivity: number       (背景誘電率 ε_r：パケット stiffness の基準値)
   ├─ breakdownThreshold: number (絶縁破壊電界閾値：|∇Φ| 超過で空中プラズマ放電)
+  ├─ oxidizerRatio: number      (酸化剤・酸素濃度：0=不燃、0.21=大気)
   └─ ambientHeat: number        (環境基準温度 U_0)
 ```
 

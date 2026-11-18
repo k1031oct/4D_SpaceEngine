@@ -318,6 +318,20 @@ export class FieldSolver {
     config: SpaceCoreConfig,
     medium?: AmbientMediumSpec,
   ): void {
+    // 永久磁石（自身の渦度による自己力を防ぐため、空間内の磁気ソース数をカウント）
+    let activeMagnetCount = 0;
+    for (const e of entities) {
+      if (
+        e.domainClass === 'Visible' &&
+        e.magneticMoment[0] * e.magneticMoment[0] +
+          e.magneticMoment[1] * e.magneticMoment[1] +
+          e.magneticMoment[2] * e.magneticMoment[2] >
+          1e-5
+      ) {
+        activeMagnetCount++;
+      }
+    }
+
     for (const ent of entities) {
       if (ent.domainClass !== 'Visible' || ent.isGrabbed) continue;
 
@@ -396,40 +410,50 @@ export class FieldSolver {
       const chiMag = mat?.magneticSusceptibility ?? 0;
 
       if (magMomentSq > 1e-5) {
-        // 永久磁石同士：極性に応じた双極子力 F = k_dip * ∇(m・ω) と回転トルク τ = m × ω
-        const gradMDotW = this.sampleSymmetricGradMDotW(grid, ent.position, ent.magneticMoment);
-        const dipFactor = 0.25 * config.magneticCoupling * invMass;
-        ax += gradMDotW[0] * dipFactor;
-        ay += gradMDotW[1] * dipFactor;
-        az += gradMDotW[2] * dipFactor;
+        // 永久磁石同士が複数ある場合のみ、双極子力 F = k_dip * ∇(m_hat・ω) と回転トルクを適用（単独磁石の自己力を完全排除）
+        if (activeMagnetCount >= 2) {
+          const magNorm = Math.sqrt(magMomentSq);
+          const mHat: Vec3 = [
+            ent.magneticMoment[0] / magNorm,
+            ent.magneticMoment[1] / magNorm,
+            ent.magneticMoment[2] / magNorm,
+          ];
+          const gradMDotW = this.sampleSymmetricGradMDotW(grid, ent.position, mHat);
+          const dipFactor = 0.8 * config.magneticCoupling * invMass;
+          const dax = gradMDotW[0] * dipFactor;
+          const day = gradMDotW[1] * dipFactor;
+          const daz = gradMDotW[2] * dipFactor;
+          if (Math.abs(dax) > 0.5) ax += dax;
+          if (Math.abs(day) > 0.5) ay += day;
+          if (Math.abs(daz) > 0.5) az += daz;
 
-        // トルクによる磁気モーメントの回転整列
-        const wx = grid.sampleField(grid.wx, ent.position);
-        const wy = grid.sampleField(grid.wy, ent.position);
-        const wz = grid.sampleField(grid.wz, ent.position);
-        const mx = ent.magneticMoment[0];
-        const my = ent.magneticMoment[1];
-        const mz = ent.magneticMoment[2];
-        const tx = my * wz - mz * wy;
-        const ty = mz * wx - mx * wz;
-        const tz = mx * wy - my * wx;
-        const rotScale = 0.08 * dt * invMass;
-        ent.angularVelocity[0] = (ent.angularVelocity[0] + tx * rotScale) * 0.92;
-        ent.angularVelocity[1] = (ent.angularVelocity[1] + ty * rotScale) * 0.92;
-        ent.angularVelocity[2] = (ent.angularVelocity[2] + tz * rotScale) * 0.92;
+          // トルクによる磁気モーメントの回転整列
+          const wx = grid.sampleField(grid.wx, ent.position);
+          const wy = grid.sampleField(grid.wy, ent.position);
+          const wz = grid.sampleField(grid.wz, ent.position);
+          const mx = ent.magneticMoment[0];
+          const my = ent.magneticMoment[1];
+          const mz = ent.magneticMoment[2];
+          const tx = my * wz - mz * wy;
+          const ty = mz * wx - mx * wz;
+          const tz = mx * wy - my * wx;
+          const rotScale = 0.08 * dt * invMass;
+          ent.angularVelocity[0] = (ent.angularVelocity[0] + tx * rotScale) * 0.92;
+          ent.angularVelocity[1] = (ent.angularVelocity[1] + ty * rotScale) * 0.92;
+          ent.angularVelocity[2] = (ent.angularVelocity[2] + tz * rotScale) * 0.92;
 
-        // magneticMoment ベクトルの微小回転更新（大きさ保存）
-        const dmx = (ent.angularVelocity[1] * mz - ent.angularVelocity[2] * my) * dt;
-        const dmy = (ent.angularVelocity[2] * mx - ent.angularVelocity[0] * mz) * dt;
-        const dmz = (ent.angularVelocity[0] * my - ent.angularVelocity[1] * mx) * dt;
-        const nmx = mx + dmx;
-        const nmy = my + dmy;
-        const nmz = mz + dmz;
-        const newMag = Math.sqrt(nmx * nmx + nmy * nmy + nmz * nmz);
-        if (newMag > 1e-6) {
-          const origMag = Math.sqrt(magMomentSq);
-          const s = origMag / newMag;
-          ent.magneticMoment = [nmx * s, nmy * s, nmz * s];
+          const dmx = (ent.angularVelocity[1] * mz - ent.angularVelocity[2] * my) * dt;
+          const dmy = (ent.angularVelocity[2] * mx - ent.angularVelocity[0] * mz) * dt;
+          const dmz = (ent.angularVelocity[0] * my - ent.angularVelocity[1] * mx) * dt;
+          const nmx = mx + dmx;
+          const nmy = my + dmy;
+          const nmz = mz + dmz;
+          const newMag = Math.sqrt(nmx * nmx + nmy * nmy + nmz * nmz);
+          if (newMag > 1e-6) {
+            const origMag = Math.sqrt(magMomentSq);
+            const s = origMag / newMag;
+            ent.magneticMoment = [nmx * s, nmy * s, nmz * s];
+          }
         }
       } else if (chiMag > 0.01) {
         // 強磁性・常磁性体（鉄球等）：空間渦度エネルギー勾配によるケルビン磁力 F_mag = χ_mag * k_mag * ∇|ω|²
@@ -467,14 +491,19 @@ export class FieldSolver {
 
       // 静止摩擦ロック中のオブジェクトの起床判定
       if (ent.isSleeping) {
-        const netHorizontalAccel = Math.sqrt((ax - backgroundField[0]) ** 2 + (az - backgroundField[2]) ** 2);
-        const upwardForceOvercomesGravity = ay > 0.2; // 重力に打ち勝って浮上する力がある
+        const netHorizontalAccel = Math.sqrt(
+          (ax - backgroundField[0]) ** 2 + (az - backgroundField[2]) ** 2,
+        );
+        const upwardForceOvercomesGravity = ay > 0.5;
         const muS = mat?.staticFriction ?? 0.5;
         const normalAccel = Math.max(0, -backgroundField[1]);
-        const horizontalOvercomesFriction = netHorizontalAccel > muS * normalAccel + 0.5;
+        // 磁石同士/鉄球の吸着後に定常的な自己/接触勾配で再起床しないよう十分な余裕閾値を設ける
+        const isMagnetic = magMomentSq > 1e-5 || chiMag > 0.01;
+        const margin = isMagnetic ? 6.0 : 0.8;
+        const horizontalOvercomesFriction = netHorizontalAccel > muS * normalAccel + margin;
 
         if (
-          ent.position[1] - ent.radius > config.floorY + 0.02 ||
+          ent.position[1] - ent.radius > config.floorY + 0.03 ||
           upwardForceOvercomesGravity ||
           horizontalOvercomesFriction
         ) {

@@ -61,7 +61,8 @@ function updateHud(state: SandboxUiState): void {
   if (state.selectedEntityMetrics) {
     const m = state.selectedEntityMetrics;
     const phaseJp = m.phaseState === 'gas' ? '気体' : m.phaseState === 'liquid' ? '液体' : '固体';
-    elSelected.textContent = `${m.name}[${phaseJp}] (q=${m.charge.toFixed(2)}, U=${m.heat.toFixed(1)}, v=${m.velocityMag.toFixed(2)})`;
+    const burnLabel = m.isBurning ? '🔥燃焼中' : '';
+    elSelected.textContent = `${m.name}[${phaseJp}]${burnLabel} (q=${m.charge.toFixed(2)}, U=${m.heat.toFixed(1)}, v=${m.velocityMag.toFixed(2)})`;
   } else {
     elSelected.textContent = 'なし';
   }

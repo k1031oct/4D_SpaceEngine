@@ -295,6 +295,7 @@ export class SandboxViewModel {
           colorHex: mat?.colorHex ?? 0xffffff,
           netCharge: e.netCharge,
           phaseState: e.phaseState ?? 'solid',
+          isBurning: Boolean(e.isBurning),
           isSleeping: e.isSleeping,
           isGrabbed: e.isGrabbed,
         });
@@ -317,6 +318,7 @@ export class SandboxViewModel {
           velocityMag: speed,
           heat: ent.internalHeat,
           phaseState: ent.phaseState ?? 'solid',
+          isBurning: Boolean(ent.isBurning),
           isSleeping: ent.isSleeping,
         };
       }

@@ -296,7 +296,10 @@ export class ThreeViewAdapter {
         mat.opacity = snap.materialId === 'ice' ? 0.72 : 1.0;
       }
 
-      if (snap.netCharge > 0.1) {
+      if (snap.isBurning) {
+        mat.emissive.setHex(0xff6b00);
+        mat.emissiveIntensity = 1.25;
+      } else if (snap.netCharge > 0.1) {
         mat.emissive.setHex(0xef4444);
         mat.emissiveIntensity = Math.min(0.8, Math.abs(snap.netCharge) * 0.25);
       } else if (snap.netCharge < -0.1) {

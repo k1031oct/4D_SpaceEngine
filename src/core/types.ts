@@ -39,6 +39,8 @@ export interface AmbientMediumSpec {
   readonly permittivity: number;
   /** 絶縁破壊電界閾値（|∇Φ| 超過で気体電離・空中放電が発生） */
   readonly breakdownThreshold: number;
+  /** 酸化剤・酸素濃度（0=不燃、0.21=大気） */
+  readonly oxidizerRatio: number;
   /** 環境基準温度（内部振動エネルギーベースライン） */
   readonly ambientHeat: number;
 }
@@ -65,6 +67,10 @@ export interface MaterialSpec {
   readonly bindingEnergy: number;
   /** 液体相における固体比密度倍率（デフォルト 0.9、氷→水は 1.09 等） */
   readonly liquidDensityRatio?: number;
+  /** 発火点（酸化還元・電子移動の活性化エネルギー閾値） */
+  readonly ignitionHeat?: number;
+  /** 燃焼時の単位時間あたり発熱・解放エネルギー */
+  readonly combustionEnergy?: number;
   /** 静止摩擦係数 μ_s */
   readonly staticFriction: number;
   /** 動摩擦係数 μ_d */
@@ -102,6 +108,12 @@ export interface SpaceEntity {
   internalHeat: number;
   /** 現在の相状態（固体 / 液体 / 気体） */
   phaseState?: PhaseState;
+  /** 酸化還元反応（燃焼）中フラグ */
+  isBurning?: boolean;
+  /** 可燃残量 (0..1) */
+  fuelRemaining?: number;
+  /** 気化分散により生成されたサブ粒子フラグ */
+  isVaporParticle?: boolean;
   /** アース接続・巨大導体フラグ */
   isGrounded: boolean;
   /** ユーザー操作中フラグ */

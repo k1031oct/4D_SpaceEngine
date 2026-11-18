@@ -14,6 +14,7 @@ export interface EntityRenderSnapshot {
   readonly colorHex: number;
   readonly netCharge: number;
   readonly phaseState: PhaseState;
+  readonly isBurning: boolean;
   readonly isSleeping: boolean;
   readonly isGrabbed: boolean;
 }
@@ -45,6 +46,7 @@ export interface SandboxUiState {
     readonly velocityMag: number;
     readonly heat: number;
     readonly phaseState: PhaseState;
+    readonly isBurning: boolean;
     readonly isSleeping: boolean;
   } | null;
   readonly debugOverlayMode: DebugOverlayMode;

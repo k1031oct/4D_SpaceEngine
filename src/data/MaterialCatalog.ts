@@ -11,6 +11,7 @@ export const DEFAULT_MEDIA: readonly AmbientMediumSpec[] = [
     viscosity: 0.0,
     permittivity: 1.0,
     breakdownThreshold: 1e6,
+    oxidizerRatio: 0.0,
     ambientHeat: 0.0,
   },
   {
@@ -20,6 +21,7 @@ export const DEFAULT_MEDIA: readonly AmbientMediumSpec[] = [
     viscosity: 0.045,
     permittivity: 1.0006,
     breakdownThreshold: 12.0,
+    oxidizerRatio: 0.21,
     ambientHeat: 0.05,
   },
   {
@@ -29,6 +31,7 @@ export const DEFAULT_MEDIA: readonly AmbientMediumSpec[] = [
     viscosity: 0.008,
     permittivity: 1.0001,
     breakdownThreshold: 7.0,
+    oxidizerRatio: 0.0,
     ambientHeat: 0.05,
   },
   {
@@ -38,6 +41,7 @@ export const DEFAULT_MEDIA: readonly AmbientMediumSpec[] = [
     viscosity: 0.012,
     permittivity: 1.0001,
     breakdownThreshold: 3.5,
+    oxidizerRatio: 0.0,
     ambientHeat: 0.05,
   },
   {
@@ -47,6 +51,7 @@ export const DEFAULT_MEDIA: readonly AmbientMediumSpec[] = [
     viscosity: 0.85,
     permittivity: 80.0,
     breakdownThreshold: 30.0,
+    oxidizerRatio: 0.0,
     ambientHeat: 0.1,
   },
 ];
@@ -88,6 +93,8 @@ export const DEFAULT_MATERIALS: readonly MaterialSpec[] = [
     spinMagnitude: 0.0,
     magneticSusceptibility: 0.0,
     bindingEnergy: 20.0,
+    ignitionHeat: 2.2,
+    combustionEnergy: 14.0,
     staticFriction: 0.75,
     dynamicFriction: 0.6,
     restitution: 0.35,
@@ -103,6 +110,8 @@ export const DEFAULT_MATERIALS: readonly MaterialSpec[] = [
     spinMagnitude: 0.0,
     magneticSusceptibility: 0.0,
     bindingEnergy: 18.0,
+    ignitionHeat: 2.0,
+    combustionEnergy: 10.0,
     staticFriction: 0.85,
     dynamicFriction: 0.7,
     restitution: 0.05,
@@ -118,6 +127,8 @@ export const DEFAULT_MATERIALS: readonly MaterialSpec[] = [
     spinMagnitude: 0.0,
     magneticSusceptibility: 0.0,
     bindingEnergy: 15.0,
+    ignitionHeat: 1.5,
+    combustionEnergy: 12.0,
     staticFriction: 0.6,
     dynamicFriction: 0.45,
     restitution: 0.05,

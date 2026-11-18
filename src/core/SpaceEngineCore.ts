@@ -116,8 +116,14 @@ export class SpaceEngineCore {
     const effectiveFrameDt = Math.min(Math.max(rawDt, 1e-5), 0.05);
     this.contactSolver.solve(activeEntities, materials, effectiveFrameDt, this.config);
 
-    // 5. 相転移（固体/液体/気体）と環境熱緩和
-    this.phaseSolver.solve(activeEntities, materials, effectiveFrameDt, medium);
+    // 5. 相転移（固体/液体/気体）・燃焼・気化集合体分散と環境熱緩和
+    activeEntities = this.phaseSolver.solve(
+      activeEntities,
+      materials,
+      effectiveFrameDt,
+      medium,
+      this.grid,
+    );
 
     return {
       metrics: {
