@@ -10,6 +10,8 @@ export type DomainClass = 'Visible' | 'Projected' | 'Absorbed';
 
 export type PhaseState = 'solid' | 'liquid' | 'gas';
 
+export type ShapeKind = 'sphere' | 'box' | 'cylinder' | 'sheet' | 'balloon';
+
 export type DebugOverlayMode = 'none' | 'pressure' | 'vorticity' | 'octree';
 
 export type MediumId = 'vacuum' | 'air' | 'helium' | 'neon' | 'water';
@@ -84,6 +86,10 @@ export interface SpaceEntity {
   angularVelocity: Vec3;
   /** 代表半径 */
   radius: number;
+  /** 3D形状種別 */
+  shape?: ShapeKind;
+  /** 形状寸法 [幅, 高さ, 奥行] */
+  dimensions?: Vec3;
   /** 質量 */
   mass: number;
   /** 蓄積電荷 q（空間の歪みソース強度） */

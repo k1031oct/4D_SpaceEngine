@@ -67,6 +67,8 @@ SpaceEntity
   ├─ velocity: [number, number, number]
   ├─ angularVelocity: [number, number, number]
   ├─ radius: number             (代表半径)
+  ├─ shape?: "sphere" | "box" | "cylinder" | "sheet" | "balloon" (実体形状)
+  ├─ dimensions?: [number, number, number] (幅・高さ・奥行のサイズ)
   ├─ mass: number
   ├─ netCharge: number          (蓄積電荷 q)
   ├─ dipoleMoment: [number, number, number]   (誘起電気双極子 p)

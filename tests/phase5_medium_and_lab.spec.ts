@@ -152,8 +152,13 @@ describe('空間媒質（真空・気体・水）および統合実験場（全�
     const wool = getEnt('lab_wool');
     balloon.isGrabbed = true;
     wool.isGrabbed = true;
+    const woolTopY = wool.position[1] + (wool.dimensions?.[1] ?? wool.radius * 2) * 0.5;
     for (let i = 0; i < 25; i++) {
-      balloon.position = [wool.position[0] + (i % 2 === 0 ? 0.04 : -0.04), wool.position[1] + 0.36, wool.position[2]];
+      balloon.position = [
+        wool.position[0] + (i % 2 === 0 ? 0.04 : -0.04),
+        woolTopY + balloon.radius * 0.85,
+        wool.position[2],
+      ];
       balloon.velocity = [i % 2 === 0 ? 1.8 : -1.8, -0.4, 0];
       vm.step(1 / 60);
     }
@@ -172,10 +177,11 @@ describe('空間媒質（真空・気体・水）および統合実験場（全�
     }
     expect(paper.position[1]).toBeGreaterThan(paperInitY + 0.01);
 
-    // 4. 帯電した風船を同じ実験場の鋼板アースへ触れさせて放電させる
+    // 4. 帯電した風船を同じ実験場の鋼板冷蔵庫アース側面へ触れさせて放電させる
     const earthPlate = getEnt('lab_earth_plate');
+    const plateHalfW = (earthPlate.dimensions?.[0] ?? earthPlate.radius * 2) * 0.5;
     balloon.position = [
-      earthPlate.position[0] + (balloon.radius + earthPlate.radius) * 0.9,
+      earthPlate.position[0] + plateHalfW + balloon.radius * 0.85,
       earthPlate.position[1],
       earthPlate.position[2],
     ];

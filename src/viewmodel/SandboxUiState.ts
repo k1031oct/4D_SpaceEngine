@@ -1,5 +1,5 @@
 import type { SimilarityInsight } from '../core/SimilarityAnalyzer';
-import type { DebugOverlayMode, MediumId, PhaseState, PresetId, Vec3 } from '../core/types';
+import type { DebugOverlayMode, MediumId, PhaseState, PresetId, ShapeKind, Vec3 } from '../core/types';
 
 /**
  * 描画層へ渡す軽量エンティティスナップショット
@@ -9,6 +9,8 @@ export interface EntityRenderSnapshot {
   readonly materialId: string;
   readonly position: Vec3;
   readonly radius: number;
+  readonly shape: ShapeKind;
+  readonly dimensions: Vec3;
   readonly colorHex: number;
   readonly netCharge: number;
   readonly phaseState: PhaseState;

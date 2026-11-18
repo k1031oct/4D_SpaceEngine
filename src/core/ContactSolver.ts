@@ -32,19 +32,8 @@ export class ContactSolver {
         const b = entities[j];
         if (b.domainClass !== 'Visible') continue;
 
-        const dx = b.position[0] - a.position[0];
-        const dy = b.position[1] - a.position[1];
-        const dz = b.position[2] - a.position[2];
-        const distSq = dx * dx + dy * dy + dz * dz;
-        const minDist = a.radius + b.radius;
-
-        if (distSq >= minDist * minDist) continue;
-
-        const dist = Math.sqrt(Math.max(distSq, 1e-10));
-        const nx = dx / dist;
-        const ny = dy / dist;
-        const nz = dz / dist;
-        const overlap = minDist - dist;
+        const { nx, ny, nz, overlap } = this.computeContactGeometry(a, b);
+        if (overlap <= 0) continue;
 
         const invMa = a.isGrabbed || a.isGrounded ? 0 : 1.0 / Math.max(a.mass, 1e-4);
         const invMb = b.isGrabbed || b.isGrounded ? 0 : 1.0 / Math.max(b.mass, 1e-4);
@@ -122,11 +111,12 @@ export class ContactSolver {
       if (ent.domainClass !== 'Visible' || ent.isGrabbed) continue;
 
       const mat = materials.get(ent.materialId);
+      const halfH = ent.dimensions ? ent.dimensions[1] * 0.5 : ent.radius;
       if (Number.isFinite(floorY)) {
-        const bottomY = ent.position[1] - ent.radius;
+        const bottomY = ent.position[1] - halfH;
 
         if (bottomY <= floorY + 1e-4) {
-          ent.position[1] = floorY + ent.radius;
+          ent.position[1] = floorY + halfH;
 
           // 垂直方向のマイクロバウンス抑制
           if (ent.velocity[1] < 0) {
@@ -251,5 +241,76 @@ export class ContactSolver {
       a.netCharge += (targetA - a.netCharge) * rate;
       b.netCharge += (targetB - b.netCharge) * rate;
     }
+  }
+
+  /**
+   * 形状（box / sheet / sphere 等）に応じた接触法線とめり込み量を算出する
+   */
+  private computeContactGeometry(
+    a: SpaceEntity,
+    b: SpaceEntity,
+  ): { nx: number; ny: number; nz: number; overlap: number } {
+    const aIsBox = (a.shape === 'box' || a.shape === 'sheet') && a.dimensions;
+    const bIsBox = (b.shape === 'box' || b.shape === 'sheet') && b.dimensions;
+
+    // 片方が大型ボックス（冷蔵庫や板など）の場合は AABB 最近接点で判定
+    if (bIsBox && !aIsBox && b.dimensions) {
+      return this.sphereVsBox(a.position, a.radius, b.position, b.dimensions, false);
+    }
+    if (aIsBox && !bIsBox && a.dimensions) {
+      return this.sphereVsBox(b.position, b.radius, a.position, a.dimensions, true);
+    }
+
+    const dx = b.position[0] - a.position[0];
+    const dy = b.position[1] - a.position[1];
+    const dz = b.position[2] - a.position[2];
+    const distSq = dx * dx + dy * dy + dz * dz;
+    const ra = a.dimensions ? Math.min(a.dimensions[0], a.dimensions[2]) * 0.5 : a.radius;
+    const rb = b.dimensions ? Math.min(b.dimensions[0], b.dimensions[2]) * 0.5 : b.radius;
+    const minDist = Math.max(ra, a.radius * 0.6) + Math.max(rb, b.radius * 0.6);
+
+    if (distSq >= minDist * minDist) {
+      return { nx: 0, ny: 1, nz: 0, overlap: 0 };
+    }
+    const dist = Math.sqrt(Math.max(distSq, 1e-10));
+    return {
+      nx: dx / dist,
+      ny: dy / dist,
+      nz: dz / dist,
+      overlap: minDist - dist,
+    };
+  }
+
+  private sphereVsBox(
+    spherePos: readonly [number, number, number],
+    radius: number,
+    boxPos: readonly [number, number, number],
+    dims: readonly [number, number, number],
+    invertNormal: boolean,
+  ): { nx: number; ny: number; nz: number; overlap: number } {
+    const hx = dims[0] * 0.5;
+    const hy = dims[1] * 0.5;
+    const hz = dims[2] * 0.5;
+
+    const cx = Math.max(boxPos[0] - hx, Math.min(boxPos[0] + hx, spherePos[0]));
+    const cy = Math.max(boxPos[1] - hy, Math.min(boxPos[1] + hy, spherePos[1]));
+    const cz = Math.max(boxPos[2] - hz, Math.min(boxPos[2] + hz, spherePos[2]));
+
+    const dx = cx - spherePos[0];
+    const dy = cy - spherePos[1];
+    const dz = cz - spherePos[2];
+    const distSq = dx * dx + dy * dy + dz * dz;
+
+    if (distSq >= radius * radius) {
+      return { nx: 0, ny: 1, nz: 0, overlap: 0 };
+    }
+    const dist = Math.sqrt(Math.max(distSq, 1e-10));
+    const sign = invertNormal ? -1 : 1;
+    return {
+      nx: (dx / dist) * sign,
+      ny: (dy / dist) * sign,
+      nz: (dz / dist) * sign,
+      overlap: radius - dist,
+    };
   }
 }

@@ -174,6 +174,17 @@ export class SandboxViewModel {
     const mass = Math.max(0.05, density * Math.pow(r / 0.2, 3));
     const spin = mat?.spinMagnitude ?? 0;
 
+    const shape =
+      req.materialId === 'rubber_balloon'
+        ? 'balloon'
+        : req.materialId === 'paper'
+          ? 'sheet'
+          : req.materialId === 'aluminum_can' || req.materialId === 'neodymium_magnet'
+            ? 'cylinder'
+            : req.materialId === 'wool_cloth' || req.materialId === 'steel_ground' || req.materialId === 'ice'
+              ? 'box'
+              : 'sphere';
+
     const entity: SpaceEntity = {
       id: `custom_${this.spawnCounter}_${req.materialId}`,
       materialId: req.materialId,
@@ -181,6 +192,13 @@ export class SandboxViewModel {
       velocity: [0, 0, 0],
       angularVelocity: [0, 0, 0],
       radius: r,
+      shape,
+      dimensions:
+        shape === 'sheet'
+          ? [r * 2, 0.016, r * 1.5]
+          : shape === 'cylinder'
+            ? [r * 1.6, r * 2.2, r * 1.6]
+            : [r * 2, r * 2, r * 2],
       mass,
       netCharge: req.charge,
       dipoleMoment: [0, 0, 0],
@@ -218,8 +236,9 @@ export class SandboxViewModel {
     const ent = this.repository.entities.find((e) => e.id === entityId);
     if (!ent || !ent.isGrabbed) return;
 
+    const halfH = ent.dimensions ? ent.dimensions[1] * 0.5 : ent.radius;
     const floorLimit = Number.isFinite(this.core.config.floorY)
-      ? this.core.config.floorY + ent.radius
+      ? this.core.config.floorY + halfH
       : -Infinity;
     const safeY = Math.max(floorLimit, targetPos[1]);
     const invDt = 1.0 / Math.max(dt, 1 / 120);
@@ -271,6 +290,8 @@ export class SandboxViewModel {
           materialId: e.materialId,
           position: [...e.position],
           radius: e.radius,
+          shape: e.shape ?? 'sphere',
+          dimensions: e.dimensions ? [...e.dimensions] : [e.radius * 2, e.radius * 2, e.radius * 2],
           colorHex: mat?.colorHex ?? 0xffffff,
           netCharge: e.netCharge,
           phaseState: e.phaseState ?? 'solid',

@@ -19,6 +19,7 @@ export class ThreeViewAdapter {
   private readonly controls: OrbitControls;
 
   private readonly entityMeshes = new Map<string, THREE.Mesh>();
+  private readonly roomGroup = new THREE.Group();
   private fieldOverlayMesh: THREE.InstancedMesh | null = null;
   private windowWireMesh: THREE.LineSegments | null = null;
   private readonly dummyObj = new THREE.Object3D();
@@ -61,29 +62,81 @@ export class ThreeViewAdapter {
   }
 
   private setupLightsAndStage(): void {
-    const ambient = new THREE.AmbientLight(0xffffff, 0.55);
+    const ambient = new THREE.AmbientLight(0xe2e8f0, 0.65);
     this.scene.add(ambient);
 
-    const dirLight = new THREE.DirectionalLight(0xffffff, 1.2);
-    dirLight.position.set(4, 7, 4);
+    const dirLight = new THREE.DirectionalLight(0xfffbeb, 1.35);
+    dirLight.position.set(3.5, 6.5, 4.0);
     dirLight.castShadow = true;
     this.scene.add(dirLight);
 
-    // 机（床面）とグリッド
-    const floorGeo = new THREE.PlaneGeometry(8, 8);
-    const floorMat = new THREE.MeshStandardMaterial({
-      color: 0x162032,
-      roughness: 0.85,
-      metalness: 0.1,
-    });
-    const floor = new THREE.Mesh(floorGeo, floorMat);
-    floor.rotation.x = -Math.PI / 2;
-    floor.receiveShadow = true;
-    this.scene.add(floor);
+    const fillLight = new THREE.PointLight(0x38bdf8, 0.4, 12);
+    fillLight.position.set(-3, 3, -2);
+    this.scene.add(fillLight);
 
-    const gridHelper = new THREE.GridHelper(4, 16, 0x38bdf8, 0x1e293b);
+    // 地球上の一部屋（実験デスク・部屋の床・壁・窓）
+    this.scene.add(this.roomGroup);
+
+    // 1. 木製実験デスク天板（上面が y = 0.0）
+    const deskTopGeo = new THREE.BoxGeometry(3.8, 0.08, 2.4);
+    const deskTopMat = new THREE.MeshStandardMaterial({
+      color: 0x7c4a2d,
+      roughness: 0.72,
+      metalness: 0.05,
+    });
+    const deskTop = new THREE.Mesh(deskTopGeo, deskTopMat);
+    deskTop.position.set(0, -0.04, 0);
+    deskTop.receiveShadow = true;
+    this.roomGroup.add(deskTop);
+
+    // デスクのスチール脚 4本
+    const legGeo = new THREE.CylinderGeometry(0.035, 0.035, 0.75, 12);
+    const legMat = new THREE.MeshStandardMaterial({ color: 0x334155, metalness: 0.7, roughness: 0.35 });
+    for (const lx of [-1.7, 1.7]) {
+      for (const lz of [-1.0, 1.0]) {
+        const leg = new THREE.Mesh(legGeo, legMat);
+        leg.position.set(lx, -0.455, lz);
+        this.roomGroup.add(leg);
+      }
+    }
+
+    // 2. 部屋のフローリング床 (y = -0.83)
+    const roomFloorGeo = new THREE.PlaneGeometry(10, 10);
+    const roomFloorMat = new THREE.MeshStandardMaterial({
+      color: 0x2a1d17,
+      roughness: 0.85,
+    });
+    const roomFloor = new THREE.Mesh(roomFloorGeo, roomFloorMat);
+    roomFloor.rotation.x = -Math.PI / 2;
+    roomFloor.position.y = -0.83;
+    roomFloor.receiveShadow = true;
+    this.roomGroup.add(roomFloor);
+
+    // 3. 部屋の壁（背面 & 左側面）と窓
+    const wallMat = new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.9 });
+    const backWall = new THREE.Mesh(new THREE.BoxGeometry(10, 5, 0.1), wallMat);
+    backWall.position.set(0, 1.67, -2.2);
+    backWall.receiveShadow = true;
+    this.roomGroup.add(backWall);
+
+    const leftWall = new THREE.Mesh(new THREE.BoxGeometry(0.1, 5, 10), wallMat);
+    leftWall.position.set(-3.2, 1.67, 0);
+    leftWall.receiveShadow = true;
+    this.roomGroup.add(leftWall);
+
+    // 背面の窓（外の空光）
+    const windowGlow = new THREE.Mesh(
+      new THREE.PlaneGeometry(1.8, 1.4),
+      new THREE.MeshBasicMaterial({ color: 0x38bdf8, transparent: true, opacity: 0.25 }),
+    );
+    windowGlow.position.set(-0.6, 1.4, -2.14);
+    this.roomGroup.add(windowGlow);
+
+    const gridHelper = new THREE.GridHelper(3.6, 18, 0x38bdf8, 0x334155);
     gridHelper.position.y = 0.002;
-    this.scene.add(gridHelper);
+    (gridHelper.material as THREE.Material).transparent = true;
+    (gridHelper.material as THREE.Material).opacity = 0.25;
+    this.roomGroup.add(gridHelper);
 
     // 演算窓（計算境界）のワイヤーフレーム表示
     const cfg = this.viewModel.core.config;
@@ -95,7 +148,7 @@ export class ThreeViewAdapter {
     const edges = new THREE.EdgesGeometry(boxGeo);
     this.windowWireMesh = new THREE.LineSegments(
       edges,
-      new THREE.LineBasicMaterial({ color: 0x334155, transparent: true, opacity: 0.45 }),
+      new THREE.LineBasicMaterial({ color: 0x334155, transparent: true, opacity: 0.35 }),
     );
     this.windowWireMesh.position.set(cfg.center[0], cfg.center[1], cfg.center[2]);
     this.scene.add(this.windowWireMesh);
@@ -212,19 +265,15 @@ export class ThreeViewAdapter {
 
   private syncEntities(state: SandboxUiState): void {
     const activeIds = new Set<string>();
+    this.roomGroup.visible = this.viewModel.core.grid.cellSize <= 2.0;
 
     for (const snap of state.renderSnapshots) {
       activeIds.add(snap.id);
       let mesh = this.entityMeshes.get(snap.id);
       if (!mesh) {
-        const geo = new THREE.SphereGeometry(snap.radius, 24, 24);
-        const mat = new THREE.MeshStandardMaterial({
-          color: snap.colorHex,
-          roughness: 0.4,
-          metalness: 0.25,
-        });
-        mesh = new THREE.Mesh(geo, mat);
+        mesh = this.createEntityMesh(snap);
         mesh.castShadow = true;
+        mesh.receiveShadow = true;
         mesh.userData.entityId = snap.id;
         this.scene.add(mesh);
         this.entityMeshes.set(snap.id, mesh);
@@ -238,13 +287,13 @@ export class ThreeViewAdapter {
         mat.transparent = true;
         mat.opacity = 0.35;
       } else if (snap.phaseState === 'liquid') {
-        mesh.scale.set(1.2, 0.75, 1.2);
+        mesh.scale.set(1.2, 0.7, 1.2);
         mat.transparent = true;
         mat.opacity = 0.78;
       } else {
         mesh.scale.set(1, 1, 1);
-        mat.transparent = false;
-        mat.opacity = 1.0;
+        mat.transparent = snap.materialId === 'ice';
+        mat.opacity = snap.materialId === 'ice' ? 0.72 : 1.0;
       }
 
       if (snap.netCharge > 0.1) {
@@ -255,7 +304,7 @@ export class ThreeViewAdapter {
         mat.emissiveIntensity = Math.min(0.8, Math.abs(snap.netCharge) * 0.25);
       } else if (snap.isSleeping) {
         mat.emissive.setHex(0x10b981);
-        mat.emissiveIntensity = 0.08;
+        mat.emissiveIntensity = 0.06;
       } else {
         mat.emissive.setHex(0x000000);
         mat.emissiveIntensity = 0;
@@ -271,6 +320,74 @@ export class ThreeViewAdapter {
         this.entityMeshes.delete(id);
       }
     }
+  }
+
+  /**
+   * 現実のオブジェクト形状・質感に合わせた3Dメッシュを生成する
+   */
+  private createEntityMesh(snap: SandboxUiState['renderSnapshots'][number]): THREE.Mesh {
+    const [w, h, d] = snap.dimensions;
+    const isMetal =
+      snap.materialId === 'iron_ball' ||
+      snap.materialId === 'aluminum_can' ||
+      snap.materialId === 'steel_ground' ||
+      snap.materialId === 'neodymium_magnet';
+
+    const mat = new THREE.MeshStandardMaterial({
+      color: snap.colorHex,
+      roughness: snap.materialId === 'ice' ? 0.1 : isMetal ? 0.25 : 0.65,
+      metalness: isMetal ? 0.8 : 0.05,
+      transparent: snap.materialId === 'ice',
+      opacity: snap.materialId === 'ice' ? 0.72 : 1.0,
+    });
+
+    if (snap.shape === 'box' || snap.shape === 'sheet') {
+      const geo = new THREE.BoxGeometry(w, h, d);
+      const mesh = new THREE.Mesh(geo, mat);
+      // 鋼板冷蔵庫（steel_ground）にはアースライン装飾を追加
+      if (snap.materialId === 'steel_ground' && h > 0.5) {
+        const doorLine = new THREE.Mesh(
+          new THREE.BoxGeometry(w * 0.92, 0.015, 0.02),
+          new THREE.MeshBasicMaterial({ color: 0x1e293b }),
+        );
+        doorLine.position.set(0, h * 0.1, d * 0.5);
+        mesh.add(doorLine);
+      }
+      return mesh;
+    }
+
+    if (snap.shape === 'cylinder') {
+      const r = Math.max(w, d) * 0.5;
+      const geo = new THREE.CylinderGeometry(r, r, h, 24);
+      const mesh = new THREE.Mesh(geo, mat);
+      // ネオジム磁石はN極(赤)・S極(青)のキャップを表示
+      if (snap.materialId === 'neodymium_magnet') {
+        const nCap = new THREE.Mesh(
+          new THREE.CylinderGeometry(r * 0.99, r * 0.99, h * 0.45, 24),
+          new THREE.MeshStandardMaterial({ color: 0xef4444, metalness: 0.6, roughness: 0.3 }),
+        );
+        nCap.position.y = h * 0.26;
+        mesh.add(nCap);
+      }
+      return mesh;
+    }
+
+    if (snap.shape === 'balloon') {
+      const geo = new THREE.SphereGeometry(snap.radius, 24, 24);
+      geo.scale(0.88, 1.08, 0.88);
+      const mesh = new THREE.Mesh(geo, mat);
+      const knot = new THREE.Mesh(
+        new THREE.ConeGeometry(snap.radius * 0.16, snap.radius * 0.25, 12),
+        mat,
+      );
+      knot.position.y = -snap.radius * 1.1;
+      mesh.add(knot);
+      return mesh;
+    }
+
+    // デフォルト: 球体（鉄球・天体など）
+    const geo = new THREE.SphereGeometry(snap.radius, 24, 24);
+    return new THREE.Mesh(geo, mat);
   }
 
   private syncFieldOverlay(mode: DebugOverlayMode): void {

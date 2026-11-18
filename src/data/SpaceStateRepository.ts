@@ -4,8 +4,10 @@ import type {
   MediumId,
   PresetId,
   ProjectedExternalSource,
+  ShapeKind,
   SpaceCoreConfig,
   SpaceEntity,
+  Vec3,
 } from '../core/types';
 import { createMaterialMap, createMediumMap } from './MaterialCatalog';
 
@@ -139,7 +141,7 @@ export class SpaceStateRepository {
         this.createEntity('desk_ball_b', 'paper', [0.5, 0.8, 0.0], 0.16, 0.3, -2.0),
       ];
     } else if (presetId === 'sandbox_lab') {
-      // 統合実験場：境界シェル地球重力・摩擦帯電・静電誘導・磁石吸着・アース放電・空間媒質が全て共存する実験場
+      // 地球上の一部屋・統合実験場：机の上のリアル形状オブジェクト＋冷蔵庫アース＋地球重力射影
       this.externalSources = [];
       const earth: SpaceEntity = {
         ...this.createEntity('earth_projected', 'steel_ground', [0, -50.0, 0], 18.0, 1e6, 0),
@@ -148,13 +150,14 @@ export class SpaceStateRepository {
       };
       this.entities = [
         earth,
-        this.createEntity('lab_balloon', 'rubber_balloon', [-1.0, 0.24, -0.3], 0.24, 0.35, 0),
-        this.createEntity('lab_wool', 'wool_cloth', [-0.45, 0.2, -0.3], 0.2, 0.8, 0),
-        this.createEntity('lab_paper', 'paper', [0.1, 0.12, -0.3], 0.12, 0.08, 0),
-        this.createEntity('lab_earth_plate', 'steel_ground', [1.1, 0.25, -0.3], 0.25, 10.0, 0),
-        this.createEntity('lab_magnet', 'neodymium_magnet', [-0.5, 0.22, 0.55], 0.22, 1.2, 0),
-        this.createEntity('lab_iron', 'iron_ball', [0.2, 0.16, 0.55], 0.16, 0.5, 0),
-        this.createEntity('lab_ice', 'ice', [0.8, 0.18, 0.55], 0.18, 0.4, 0),
+        this.createEntity('lab_balloon', 'rubber_balloon', [-1.05, 0.22, -0.3], 0.22, 0.35, 0, 'balloon', [0.38, 0.44, 0.38]),
+        this.createEntity('lab_wool', 'wool_cloth', [-0.45, 0.04, -0.3], 0.2, 0.8, 0, 'box', [0.42, 0.08, 0.32]),
+        this.createEntity('lab_paper', 'paper', [0.1, 0.008, -0.3], 0.12, 0.08, 0, 'sheet', [0.24, 0.016, 0.18]),
+        this.createEntity('lab_can', 'aluminum_can', [0.48, 0.12, -0.35], 0.09, 0.25, 0, 'cylinder', [0.16, 0.24, 0.16]),
+        this.createEntity('lab_earth_plate', 'steel_ground', [1.25, 0.55, -0.25], 0.35, 10.0, 0, 'box', [0.60, 1.10, 0.55]),
+        this.createEntity('lab_magnet', 'neodymium_magnet', [-0.5, 0.045, 0.55], 0.14, 1.2, 0, 'cylinder', [0.24, 0.09, 0.24]),
+        this.createEntity('lab_iron', 'iron_ball', [0.15, 0.14, 0.55], 0.14, 0.5, 0, 'sphere', [0.28, 0.28, 0.28]),
+        this.createEntity('lab_ice', 'ice', [0.72, 0.11, 0.55], 0.14, 0.4, 0, 'box', [0.22, 0.22, 0.22]),
       ];
     }
   }
@@ -166,9 +169,23 @@ export class SpaceStateRepository {
     radius: number,
     mass: number,
     netCharge: number,
+    shape?: ShapeKind,
+    dimensions?: Vec3,
   ): SpaceEntity {
     const mat = this.materials.get(materialId);
     const spin = mat?.spinMagnitude ?? 0;
+    const defaultShape: ShapeKind =
+      shape ??
+      (materialId === 'rubber_balloon'
+        ? 'balloon'
+        : materialId === 'paper'
+          ? 'sheet'
+          : materialId === 'aluminum_can' || materialId === 'neodymium_magnet'
+            ? 'cylinder'
+            : materialId === 'wool_cloth' || materialId === 'steel_ground' || materialId === 'ice'
+              ? 'box'
+              : 'sphere');
+
     return {
       id,
       materialId,
@@ -176,6 +193,8 @@ export class SpaceStateRepository {
       velocity: [0, 0, 0],
       angularVelocity: [0, 0, 0],
       radius,
+      shape: defaultShape,
+      dimensions: dimensions ?? [radius * 2, radius * 2, radius * 2],
       mass,
       netCharge,
       dipoleMoment: [0, 0, 0],
