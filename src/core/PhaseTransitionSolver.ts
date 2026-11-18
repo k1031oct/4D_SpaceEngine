@@ -14,6 +14,19 @@ export class PhaseTransitionSolver {
   private vaporCounter = 0;
 
   /**
+   * 現在の内部熱エネルギーと結合エネルギーから実効結合度 (0..1) を返す
+   * 0 = 結合完全崩壊（液体/気体：弾性復元力ゼロ）、1 = 完全結合（固体）
+   */
+  public static getEffectiveBondRatio(
+    entity: Readonly<SpaceEntity>,
+    material: MaterialSpec | undefined,
+  ): number {
+    const binding = material?.bindingEnergy ?? 20.0;
+    if (binding <= 1e-6) return 0;
+    return Math.max(0, Math.min(1, 1.0 - entity.internalHeat / binding));
+  }
+
+  /**
    * エンティティの現在の相状態に応じた実効密度を返す
    */
   public static getEffectiveDensity(
@@ -116,10 +129,19 @@ export class PhaseTransitionSolver {
         }
       }
 
-      // 5. 気化＝知覚スケール一定下での集合体の分裂・分散（Dispersion）
+      // 5. 気化分散 または 弾性限界超過（elasticEnergy > bindingEnergy）による結合破断
       if (nextPhase === 'gas' && !ent.isVaporParticle && ent.radius > 0.08 && !ent.isGrabbed) {
         const dispersed = this.disperseIntoVaporCluster(ent);
         nextEntities.push(...dispersed);
+      } else if (
+        (ent.elasticEnergy ?? 0) > mat.bindingEnergy &&
+        !ent.isVaporParticle &&
+        ent.radius > 0.08 &&
+        !ent.isGrabbed
+      ) {
+        // 弾性エネルギーが結合エネルギーを超過：結合破断し2つの破片へ分裂
+        const fragments = this.fractureEntity(ent);
+        nextEntities.push(...fragments);
       } else {
         nextEntities.push(ent);
       }
@@ -179,6 +201,46 @@ export class PhaseTransitionSolver {
       });
     }
     return children;
+  }
+
+  private fractureEntity(parent: SpaceEntity): SpaceEntity[] {
+    const halfMass = parent.mass * 0.5;
+    const halfCharge = parent.netCharge * 0.5;
+    const fragRadius = Math.max(0.05, parent.radius * 0.65);
+    const releasedHeat = (parent.elasticEnergy ?? 0) * 0.5;
+    const dirs: readonly [number, number, number][] = [
+      [1, 0.2, 0],
+      [-1, 0.2, 0],
+    ];
+    return dirs.map((d) => {
+      this.vaporCounter++;
+      return {
+        id: `${parent.id}_frag_${this.vaporCounter}`,
+        materialId: parent.materialId,
+        position: [
+          parent.position[0] + d[0] * fragRadius,
+          parent.position[1] + d[1] * fragRadius,
+          parent.position[2],
+        ],
+        velocity: [parent.velocity[0] + d[0] * 0.8, parent.velocity[1] + 0.5, parent.velocity[2]],
+        angularVelocity: [0, 0, 0],
+        radius: fragRadius,
+        shape: parent.shape,
+        dimensions: [fragRadius * 2, fragRadius * 2, fragRadius * 2],
+        mass: halfMass,
+        netCharge: halfCharge,
+        dipoleMoment: [0, 0, 0],
+        magneticMoment: [0, 0, 0],
+        internalHeat: parent.internalHeat + releasedHeat * 0.5,
+        elasticEnergy: 0,
+        phaseState: parent.phaseState,
+        isVaporParticle: true,
+        isGrounded: false,
+        isGrabbed: false,
+        isSleeping: false,
+        domainClass: 'Visible',
+      };
+    });
   }
 
   private injectCombustionEnergy(

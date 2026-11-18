@@ -1,3 +1,4 @@
+import { PhaseTransitionSolver } from './PhaseTransitionSolver';
 import type { MaterialSpec, SpaceCoreConfig, SpaceEntity } from './types';
 
 /**
@@ -158,9 +159,12 @@ export class ContactSolver {
               ent.velocity[1] = 0;
             } else {
               const impactKE = 0.5 * ent.mass * impactSpeed * impactSpeed;
+              const bondRatio = PhaseTransitionSolver.getEffectiveBondRatio(ent, mat);
               const objPlasticity = mat?.plasticity ?? 0.5;
-              const plasticity = Math.max(objPlasticity, 0.52); // 机との衝突による最低限のエネルギー吸収を含む実効塑性
-              const elasticity = mat?.elasticity ?? 1.0;
+              // 結合度が低下（熱軟化）するほどエネルギーが熱へ散逸し、液体(bondRatio=0)では反発ゼロになる
+              const thermalSoftenedPlasticity = 1.0 - (1.0 - objPlasticity) * bondRatio;
+              const plasticity = Math.max(thermalSoftenedPlasticity, 0.52);
+              const elasticity = (mat?.elasticity ?? 1.0) * Math.max(0.05, bondRatio);
 
               // 塑性・粘弾性散逸分は内部熱エネルギーへ変換
               ent.internalHeat += impactKE * plasticity * 0.25;

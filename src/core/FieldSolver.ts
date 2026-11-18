@@ -100,7 +100,8 @@ export class FieldSolver {
     for (const ent of entities) {
       if (ent.domainClass !== 'Visible') continue;
       const mat = materials.get(ent.materialId);
-      const elasticity = mat?.elasticity ?? 1.0;
+      const bondRatio = PhaseTransitionSolver.getEffectiveBondRatio(ent, mat);
+      const elasticity = 1.0 + ((mat?.elasticity ?? 1.0) - 1.0) * bondRatio;
 
       const hasCharge = Math.abs(ent.netCharge) > 1e-7;
       const hasMag =

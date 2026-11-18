@@ -413,4 +413,69 @@ describe('空間媒質（真空・気体・水）および統合実験場（全�
     expect(balloon.maxReboundVy).toBeGreaterThan(wool.maxReboundVy + 1.0);
     expect(wool.heat).toBeGreaterThan(balloon.heat);
   });
+
+  it('結合度連動テスト: 熱軟化により弾性反発が低下し、弾性エネルギーがbindingEnergyを超えると結合破断すること', () => {
+    const dropWithHeat = (heat: number) => {
+      const repo = new SpaceStateRepository(createDefaultCoreConfig());
+      repo.externalSources = [{ id: 'g', uniformField: [0, -9.8, 0] }];
+      repo.entities = [
+        {
+          id: 'b',
+          materialId: 'rubber_balloon',
+          position: [0, 1.0, 0],
+          velocity: [0, 0, 0],
+          angularVelocity: [0, 0, 0],
+          radius: 0.2,
+          mass: 0.5,
+          netCharge: 0,
+          dipoleMoment: [0, 0, 0],
+          magneticMoment: [0, 0, 0],
+          internalHeat: heat,
+          isGrounded: false,
+          isGrabbed: false,
+          isSleeping: false,
+          domainClass: 'Visible',
+        },
+      ];
+      const core = new SpaceEngineCore(repo.config);
+      let maxVy = 0;
+      for (let i = 0; i < 40; i++) {
+        core.step(repo.entities, repo.materials, repo.externalSources, 1 / 60);
+        if (repo.entities[0].velocity[1] > maxVy) maxVy = repo.entities[0].velocity[1];
+      }
+      return maxVy;
+    };
+
+    const coldRebound = dropWithHeat(0.0);
+    const hotSoftenedRebound = dropWithHeat(18.0); // bindingEnergy(20)に近い高温状態
+    expect(coldRebound).toBeGreaterThan(hotSoftenedRebound + 1.0);
+
+    // 2. 弾性エネルギー > bindingEnergy で結合破断（2破片へ分裂）
+    const repo2 = new SpaceStateRepository(createDefaultCoreConfig());
+    repo2.externalSources = [];
+    repo2.entities = [
+      {
+        id: 'ice_block',
+        materialId: 'ice', // bindingEnergy = 2.0
+        position: [0, 1.0, 0],
+        velocity: [0, 0, 0],
+        angularVelocity: [0, 0, 0],
+        radius: 0.18,
+        mass: 0.5,
+        netCharge: 0,
+        dipoleMoment: [0, 0, 0],
+        magneticMoment: [0, 0, 0],
+        internalHeat: 0,
+        elasticEnergy: 3.0, // bindingEnergy (2.0) を超過
+        isGrounded: false,
+        isGrabbed: false,
+        isSleeping: false,
+        domainClass: 'Visible',
+      },
+    ];
+    const core2 = new SpaceEngineCore(repo2.config);
+    const res = core2.step(repo2.entities, repo2.materials, repo2.externalSources, 1 / 60);
+    expect(res.entities.length).toBe(2);
+    expect(res.entities[0].id).toContain('ice_block_frag_');
+  });
 });
