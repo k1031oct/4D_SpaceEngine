@@ -164,7 +164,8 @@ export class ContactSolver {
               // 結合度が低下（熱軟化）するほどエネルギーが熱へ散逸し、液体(bondRatio=0)では反発ゼロになる
               const thermalSoftenedPlasticity = 1.0 - (1.0 - objPlasticity) * bondRatio;
               const plasticity = Math.max(thermalSoftenedPlasticity, 0.52);
-              const elasticity = (mat?.elasticity ?? 1.0) * Math.max(0.05, bondRatio);
+              // 剛性は実効密度と電荷結合力から導出
+              const elasticity = Math.max(0.05, PhaseTransitionSolver.getEffectiveRigidity(ent, mat));
 
               // 塑性・粘弾性散逸分は内部熱エネルギーへ変換
               ent.internalHeat += impactKE * plasticity * 0.25;

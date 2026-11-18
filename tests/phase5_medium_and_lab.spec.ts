@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { PhaseTransitionSolver } from '../src/core/PhaseTransitionSolver';
 import { SpaceEngineCore } from '../src/core/SpaceEngineCore';
 import { createDefaultCoreConfig, SpaceStateRepository } from '../src/data/SpaceStateRepository';
 import { SandboxViewModel } from '../src/viewmodel/SandboxViewModel';
@@ -527,5 +528,47 @@ describe('空間媒質（真空・気体・水）および統合実験場（全�
 
     // 中性・非磁性の紙片が、高質量体の統一万有引力 G*M により引き寄せられること
     expect(repo.entities[1].position[0]).toBeLessThan(initX - 0.1);
+  });
+
+  it('剛性創発テスト: 密度×電荷結合力から剛性が算出され、鉄＞アルミ＞ゴムの順となり液化で剛性0になること', () => {
+    const repo = new SpaceStateRepository(createDefaultCoreConfig());
+    const makeEnt = (materialId: string, heat = 0) => ({
+      id: materialId,
+      materialId,
+      position: [0, 0, 0] as [number, number, number],
+      velocity: [0, 0, 0] as [number, number, number],
+      angularVelocity: [0, 0, 0] as [number, number, number],
+      radius: 0.2,
+      mass: 1.0,
+      netCharge: 0,
+      dipoleMoment: [0, 0, 0] as [number, number, number],
+      magneticMoment: [0, 0, 0] as [number, number, number],
+      internalHeat: heat,
+      isGrounded: false,
+      isGrabbed: false,
+      isSleeping: false,
+      domainClass: 'Visible' as const,
+    });
+
+    const rIron = PhaseTransitionSolver.getEffectiveRigidity(
+      makeEnt('iron_ball'),
+      repo.materials.get('iron_ball'),
+    );
+    const rAlum = PhaseTransitionSolver.getEffectiveRigidity(
+      makeEnt('aluminum_can'),
+      repo.materials.get('aluminum_can'),
+    );
+    const rBalloon = PhaseTransitionSolver.getEffectiveRigidity(
+      makeEnt('rubber_balloon'),
+      repo.materials.get('rubber_balloon'),
+    );
+    const rMeltedIce = PhaseTransitionSolver.getEffectiveRigidity(
+      makeEnt('ice', 3.0), // bindingEnergy (2.0) 以上で液化
+      repo.materials.get('ice'),
+    );
+
+    expect(rIron).toBeGreaterThan(rAlum);
+    expect(rAlum).toBeGreaterThan(rBalloon);
+    expect(rMeltedIce).toBe(0);
   });
 });

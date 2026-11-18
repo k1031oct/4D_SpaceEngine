@@ -45,6 +45,22 @@ export class PhaseTransitionSolver {
   }
 
   /**
+   * 素粒子密度と電荷結合力（bindingEnergy × bondRatio）から第一原理で剛性（弾性率）を算出する
+   * 液体・気体 (bondRatio = 0) では剛性が 0 になる
+   */
+  public static getEffectiveRigidity(
+    entity: Readonly<SpaceEntity>,
+    material: MaterialSpec | undefined,
+  ): number {
+    const effDensity = PhaseTransitionSolver.getEffectiveDensity(entity, material);
+    const binding = material?.bindingEnergy ?? 20.0;
+    const bondRatio = PhaseTransitionSolver.getEffectiveBondRatio(entity, material);
+    const cohesiveEnergyDensity = effDensity * binding * bondRatio;
+    if (cohesiveEnergyDensity <= 0) return 0;
+    return Math.min(4.0, 0.08 * Math.sqrt(cohesiveEnergyDensity));
+  }
+
+  /**
    * 相転移・燃焼反応・気化集合体分散を実行し、更新されたエンティティ配列を返す
    */
   public solve(
