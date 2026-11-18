@@ -1,0 +1,220 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>4D Scale Space Engine - Phase 1</title>
+    <style>
+      * {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+      body {
+        font-family: 'Segoe UI', 'Yu Gothic UI', sans-serif;
+        background: #0b0f17;
+        color: #e2e8f0;
+        overflow: hidden;
+        height: 100vh;
+        width: 100vw;
+        display: flex;
+      }
+      #canvas-container {
+        flex: 1;
+        position: relative;
+        height: 100%;
+        touch-action: none;
+      }
+      #hud {
+        position: absolute;
+        top: 12px;
+        left: 12px;
+        background: rgba(15, 23, 42, 0.85);
+        border: 1px solid rgba(148, 163, 184, 0.25);
+        border-radius: 8px;
+        padding: 12px 16px;
+        width: 320px;
+        max-height: calc(100vh - 24px);
+        overflow-y: auto;
+        backdrop-filter: blur(8px);
+        pointer-events: auto;
+        font-size: 13px;
+        line-height: 1.5;
+      }
+      #inspector-panel {
+        position: absolute;
+        top: 12px;
+        right: 12px;
+        background: rgba(15, 23, 42, 0.85);
+        border: 1px solid rgba(56, 189, 248, 0.3);
+        border-radius: 8px;
+        padding: 12px 16px;
+        width: 310px;
+        max-height: calc(100vh - 24px);
+        overflow-y: auto;
+        backdrop-filter: blur(8px);
+        pointer-events: auto;
+        font-size: 12px;
+        line-height: 1.45;
+      }
+      #inspector-panel h2 {
+        font-size: 13px;
+        color: #38bdf8;
+        margin: 8px 0 4px 0;
+      }
+      #inspector-panel h2:first-child {
+        margin-top: 0;
+      }
+      .eq-box {
+        background: rgba(30, 41, 59, 0.8);
+        border: 1px solid #334155;
+        border-radius: 5px;
+        padding: 6px 8px;
+        font-family: 'Consolas', monospace;
+        color: #7dd3fc;
+        margin: 4px 0;
+      }
+      .spawn-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 6px;
+        margin-top: 6px;
+      }
+      .spawn-grid label {
+        font-size: 11px;
+        color: #94a3b8;
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+      }
+      .spawn-grid input, .spawn-grid select {
+        width: 100%;
+      }
+      #hud h1 {
+        font-size: 15px;
+        color: #38bdf8;
+        margin-bottom: 8px;
+      }
+      .metric-row {
+        display: flex;
+        justify-content: space-between;
+        border-bottom: 1px solid rgba(148, 163, 184, 0.12);
+        padding: 3px 0;
+      }
+      .metric-label {
+        color: #94a3b8;
+      }
+      .metric-val {
+        font-family: 'Consolas', monospace;
+        color: #f8fafc;
+      }
+      .controls {
+        margin-top: 10px;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+      }
+      button, select {
+        background: #1e293b;
+        color: #e2e8f0;
+        border: 1px solid #334155;
+        border-radius: 5px;
+        padding: 5px 9px;
+        font-size: 12px;
+        cursor: pointer;
+      }
+      button:hover {
+        background: #334155;
+      }
+      button.primary {
+        background: #0284c7;
+        border-color: #0369a1;
+      }
+      button.primary:hover {
+        background: #0369a1;
+      }
+      .hint {
+        margin-top: 8px;
+        font-size: 11px;
+        color: #94a3b8;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="canvas-container">
+      <div id="hud">
+        <h1>4D Scale Space Engine (Phase 3)</h1>
+        <div class="metric-row"><span class="metric-label">知覚スケール log₁₀L</span><span id="m-scale" class="metric-val">-0.60</span></div>
+        <div class="metric-row"><span class="metric-label">領域 (Vis/Proj/Abs)</span><span id="m-domains" class="metric-val">0 / 0 / 0</span></div>
+        <div class="metric-row"><span class="metric-label">稼働パケット数</span><span id="m-packets" class="metric-val">0</span></div>
+        <div class="metric-row"><span class="metric-label">ε-Cutoff 省略率</span><span id="m-sleep" class="metric-val">0.0%</span></div>
+        <div class="metric-row"><span class="metric-label">実効 Δt (CFL)</span><span id="m-dt" class="metric-val">0.000s</span></div>
+        <div class="metric-row"><span class="metric-label">総エネルギー</span><span id="m-energy" class="metric-val">0.000</span></div>
+        <div class="metric-row"><span class="metric-label">選択オブジェクト</span><span id="m-selected" class="metric-val">なし</span></div>
+        <div class="controls">
+          <button id="btn-toggle" class="primary">一時停止</button>
+          <button id="btn-reset">リセット</button>
+          <select id="sel-preset">
+            <option value="gravity_rest">1. 重力静止収束テスト</option>
+            <option value="dipole_pair">2. 空間歪み双極子（引力）</option>
+            <option value="repulsion_pair">3. 同符号空間歪み（斥力）</option>
+            <option value="tribo_induction">4. 摩擦帯電・静電誘導・アース</option>
+            <option value="magnet_attraction">5. ネオジム磁石・鉄球吸着</option>
+            <option value="multi_scale_solar">6. 4Dマルチスケール（机上↔宇宙）</option>
+          </select>
+          <select id="sel-overlay">
+            <option value="pressure">空間可視化: 気圧偏差 Φ</option>
+            <option value="vorticity">空間可視化: 渦度 |ω|</option>
+            <option value="octree">空間可視化: 中心窩 Octree</option>
+            <option value="none">空間可視化: オフ</option>
+          </select>
+        </div>
+        <div style="margin-top: 8px;">
+          <label for="rng-scale" style="font-size: 11px; color: #94a3b8; display: block;">
+            第4軸 知覚スケール (log₁₀L): <span id="lbl-scale-val">自動</span>
+          </label>
+          <input id="rng-scale" type="range" min="-0.8" max="1.2" step="0.05" value="-0.6" style="width: 100%;" />
+        </div>
+        <div class="hint">
+          操作: 左ドラッグ=カメラ回転 / 右ドラッグ=パン / ホイール=ズーム<br>
+          オブジェクトをクリック&amp;ドラッグで掴んで移動（Shift+ドラッグで上下移動）
+        </div>
+      </div>
+
+      <div id="inspector-panel">
+        <h2>相似性比較インスペクター</h2>
+        <div class="metric-row"><span class="metric-label">スケール階層</span><span id="sim-regime" class="metric-val">-</span></div>
+        <div class="metric-row"><span class="metric-label">支配現象</span><span id="sim-dom" class="metric-val">-</span></div>
+        <div class="metric-row"><span class="metric-label">ミクロ相似</span><span id="sim-micro" class="metric-val">-</span></div>
+        <div class="metric-row"><span class="metric-label">マクロ相似</span><span id="sim-macro" class="metric-val">-</span></div>
+        <div id="sim-eq" class="eq-box">∇²Φ = 0</div>
+
+        <h2>カスタム物性・天体スポナー</h2>
+        <div class="spawn-grid">
+          <label>マテリアル
+            <select id="sp-mat">
+              <option value="rubber_balloon">ゴム風船</option>
+              <option value="paper">紙片</option>
+              <option value="iron_ball">鉄球</option>
+              <option value="neodymium_magnet">ネオジム磁石</option>
+              <option value="wool_cloth">ウール布</option>
+              <option value="aluminum_can">アルミ缶</option>
+              <option value="steel_ground">鋼板アース</option>
+            </select>
+          </label>
+          <label>初期電荷 q
+            <input id="sp-charge" type="number" step="0.5" value="2.0" />
+          </label>
+          <label>半径 r (m)
+            <input id="sp-radius" type="number" step="0.05" min="0.05" value="0.20" />
+          </label>
+          <label>重力源強度
+            <input id="sp-grav" type="number" step="10" min="0" value="0" />
+          </label>
+        </div>
+        <button id="btn-spawn" class="primary" style="width: 100%; margin-top: 8px;">空間へスポーン</button>
+      </div>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
