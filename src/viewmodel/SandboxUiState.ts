@@ -13,6 +13,7 @@ export interface EntityRenderSnapshot {
   readonly dimensions: Vec3;
   readonly colorHex: number;
   readonly netCharge: number;
+  readonly compression: number;
   readonly phaseState: PhaseState;
   readonly isBurning: boolean;
   readonly isSleeping: boolean;

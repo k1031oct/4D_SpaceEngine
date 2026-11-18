@@ -41,8 +41,8 @@ export class FieldSolver {
     const substeps = Math.max(1, Math.min(32, Math.ceil(clampedRawDt / maxSafeDt)));
     const dtSub = clampedRawDt / substeps;
 
-    // 2. Visible エンティティからのソース注入（電荷・磁気スピン）
-    this.injectSources(grid, entities);
+    // 2. Visible エンティティからのソース注入（電荷・磁気スピン・空間弾性 stiffness）
+    this.injectSources(grid, entities, materials);
 
     // 3. サブステップでの空間場更新（緩和・フロー・渦度・散逸）
     const permittivity = Math.max(0.1, medium?.permittivity ?? 1.0);
@@ -86,22 +86,28 @@ export class FieldSolver {
   }
 
   /**
-   * エンティティの電荷・磁気モーメントを空間パケットのソース項へトリリニア分配する
+   * エンティティの電荷・磁気モーメント・弾性率を空間パケットへ注入する
    */
-  private injectSources(grid: SpacePacketGrid, entities: readonly SpaceEntity[]): void {
+  private injectSources(
+    grid: SpacePacketGrid,
+    entities: readonly SpaceEntity[],
+    materials: ReadonlyMap<string, MaterialSpec>,
+  ): void {
     grid.clearSources();
+    grid.stiffness.fill(1.0);
     const invVol = 1.0 / grid.cellVolume;
 
     for (const ent of entities) {
       if (ent.domainClass !== 'Visible') continue;
+      const mat = materials.get(ent.materialId);
+      const elasticity = mat?.elasticity ?? 1.0;
+
       const hasCharge = Math.abs(ent.netCharge) > 1e-7;
       const hasMag =
         Math.abs(ent.magneticMoment[0]) +
           Math.abs(ent.magneticMoment[1]) +
           Math.abs(ent.magneticMoment[2]) >
         1e-7;
-
-      if (!hasCharge && !hasMag) continue;
 
       const [gx, gy, gz] = grid.worldToGrid(ent.position);
       const x0 = Math.max(1, Math.min(grid.nx - 3, Math.floor(gx)));
@@ -120,6 +126,11 @@ export class FieldSolver {
             const w = wx * wy * wz;
             const idx = grid.index(x0 + dx, y0 + dy, z0 + dz);
 
+            // 空間パケットの弾性・硬さ stiffness へマテリアルの弾性率を反映
+            if (elasticity !== 1.0) {
+              grid.stiffness[idx] += (elasticity - 1.0) * w;
+            }
+
             if (hasCharge) {
               grid.sourcePhi[idx] += ent.netCharge * w * invVol;
             }
@@ -128,8 +139,9 @@ export class FieldSolver {
               grid.sourceWy[idx] += ent.magneticMoment[1] * w * invVol;
               grid.sourceWz[idx] += ent.magneticMoment[2] * w * invVol;
             }
-            // ソースがあるセルはスリープ解除
-            grid.isSleeping[idx] = 0;
+            if (hasCharge || hasMag) {
+              grid.isSleeping[idx] = 0;
+            }
           }
         }
       }
@@ -679,7 +691,7 @@ export class FieldSolver {
         ent.velocity[0] * ent.velocity[0] +
         ent.velocity[1] * ent.velocity[1] +
         ent.velocity[2] * ent.velocity[2];
-      total += 0.5 * ent.mass * v2 + ent.internalHeat;
+      total += 0.5 * ent.mass * v2 + ent.internalHeat + (ent.elasticEnergy ?? 0);
     }
     return total;
   }

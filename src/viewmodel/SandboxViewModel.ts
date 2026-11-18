@@ -294,6 +294,7 @@ export class SandboxViewModel {
           dimensions: e.dimensions ? [...e.dimensions] : [e.radius * 2, e.radius * 2, e.radius * 2],
           colorHex: mat?.colorHex ?? 0xffffff,
           netCharge: e.netCharge,
+          compression: e.compression ?? 0,
           phaseState: e.phaseState ?? 'solid',
           isBurning: Boolean(e.isBurning),
           isSleeping: e.isSleeping,

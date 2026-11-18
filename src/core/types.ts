@@ -71,6 +71,10 @@ export interface MaterialSpec {
   readonly ignitionHeat?: number;
   /** 燃焼時の単位時間あたり発熱・解放エネルギー */
   readonly combustionEnergy?: number;
+  /** 弾性率（ヤング率相当：硬さ・空間 stiffness 寄与） */
+  readonly elasticity?: number;
+  /** 塑性・粘弾性散逸率（0=完全弾性、1=変形エネルギーをすべて熱へ散逸） */
+  readonly plasticity?: number;
   /** 静止摩擦係数 μ_s */
   readonly staticFriction: number;
   /** 動摩擦係数 μ_d */
@@ -106,6 +110,10 @@ export interface SpaceEntity {
   magneticMoment: Vec3;
   /** 内部熱エネルギー */
   internalHeat: number;
+  /** 蓄積された弾性ポテンシャルエネルギー U_elastic */
+  elasticEnergy?: number;
+  /** 弾性圧縮ひずみ (0..0.35) */
+  compression?: number;
   /** 現在の相状態（固体 / 液体 / 気体） */
   phaseState?: PhaseState;
   /** 酸化還元反応（燃焼）中フラグ */

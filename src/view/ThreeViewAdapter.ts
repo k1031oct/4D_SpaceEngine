@@ -291,7 +291,11 @@ export class ThreeViewAdapter {
         mat.transparent = true;
         mat.opacity = 0.78;
       } else {
-        mesh.scale.set(1, 1, 1);
+        // 弾性圧縮ひずみ compression に応じた体積保存スクイーズ変形
+        const c = Math.min(0.32, snap.compression);
+        const sy = Math.max(0.65, 1.0 - c);
+        const sxz = 1.0 / Math.sqrt(sy);
+        mesh.scale.set(sxz, sy, sxz);
         mat.transparent = snap.materialId === 'ice';
         mat.opacity = snap.materialId === 'ice' ? 0.72 : 1.0;
       }

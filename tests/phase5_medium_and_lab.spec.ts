@@ -370,4 +370,47 @@ describe('空間媒質（真空・気体・水）および統合実験場（全�
     vm.step(1 / 60);
     expect(paper.isBurning).toBe(false);
   });
+
+  it('弾性エネルギーテスト: ゴム風船は衝突時に大きく弾性変形して反発し、高塑性のウール布は熱へ散逸して跳ね返らないこと', () => {
+    const dropTest = (materialId: 'rubber_balloon' | 'wool_cloth') => {
+      const repo = new SpaceStateRepository(createDefaultCoreConfig());
+      repo.externalSources = [{ id: 'g', uniformField: [0, -9.8, 0] }];
+      repo.entities = [
+        {
+          id: 'obj',
+          materialId,
+          position: [0, 1.0, 0],
+          velocity: [0, 0, 0],
+          angularVelocity: [0, 0, 0],
+          radius: 0.2,
+          mass: 0.5,
+          netCharge: 0,
+          dipoleMoment: [0, 0, 0],
+          magneticMoment: [0, 0, 0],
+          internalHeat: 0,
+          isGrounded: false,
+          isGrabbed: false,
+          isSleeping: false,
+          domainClass: 'Visible',
+        },
+      ];
+      const core = new SpaceEngineCore(repo.config);
+      let maxCompression = 0;
+      let maxReboundVy = 0;
+      for (let i = 0; i < 45; i++) {
+        core.step(repo.entities, repo.materials, repo.externalSources, 1 / 60);
+        const e = repo.entities[0];
+        if ((e.compression ?? 0) > maxCompression) maxCompression = e.compression ?? 0;
+        if (e.velocity[1] > maxReboundVy) maxReboundVy = e.velocity[1];
+      }
+      return { maxCompression, maxReboundVy, heat: repo.entities[0].internalHeat };
+    };
+
+    const balloon = dropTest('rubber_balloon');
+    const wool = dropTest('wool_cloth');
+
+    expect(balloon.maxCompression).toBeGreaterThan(0.05);
+    expect(balloon.maxReboundVy).toBeGreaterThan(wool.maxReboundVy + 1.0);
+    expect(wool.heat).toBeGreaterThan(balloon.heat);
+  });
 });

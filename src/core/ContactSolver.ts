@@ -15,8 +15,12 @@ export class ContactSolver {
     dt: number,
     config: SpaceCoreConfig,
   ): void {
-    // 1. 位置積分（スリープ中・操作中でない物体）
+    // 1. 位置積分と弾性圧縮ひずみの復元減衰
     for (const ent of entities) {
+      if ((ent.compression ?? 0) > 0) {
+        ent.compression = Math.max(0, (ent.compression ?? 0) - 2.5 * dt);
+        ent.elasticEnergy = (ent.elasticEnergy ?? 0) * Math.max(0, 1.0 - 8.0 * dt);
+      }
       if (ent.domainClass !== 'Visible' || ent.isGrabbed || ent.isSleeping) continue;
       ent.position[0] += ent.velocity[0] * dt;
       ent.position[1] += ent.velocity[1] * dt;
@@ -147,12 +151,33 @@ export class ContactSolver {
         if (bottomY <= floorY + 2e-3) {
           ent.position[1] = floorY + halfH;
 
-          // 垂直方向のマイクロバウンス抑制
+          // 垂直方向の弾性エネルギー蓄積・塑性熱散逸・復元反発
           if (ent.velocity[1] < 0) {
-            const e = Math.abs(ent.velocity[1]) < 0.25 ? 0.0 : (mat?.restitution ?? 0.15);
-            ent.velocity[1] = Math.abs(ent.velocity[1]) * e;
-            if (Math.abs(ent.velocity[1]) < 0.05) {
+            const impactSpeed = Math.abs(ent.velocity[1]);
+            if (impactSpeed < 0.35) {
               ent.velocity[1] = 0;
+            } else {
+              const impactKE = 0.5 * ent.mass * impactSpeed * impactSpeed;
+              const objPlasticity = mat?.plasticity ?? 0.5;
+              const plasticity = Math.max(objPlasticity, 0.52); // 机との衝突による最低限のエネルギー吸収を含む実効塑性
+              const elasticity = mat?.elasticity ?? 1.0;
+
+              // 塑性・粘弾性散逸分は内部熱エネルギーへ変換
+              ent.internalHeat += impactKE * plasticity * 0.25;
+
+              // 弾性ポテンシャルエネルギーとして蓄積し、復元反発へ変換
+              const storedElastic = impactKE * (1.0 - plasticity);
+              ent.elasticEnergy = (ent.elasticEnergy ?? 0) + storedElastic;
+
+              // 弾性率に応じた圧縮ひずみ δ/r を算出（柔らかいゴムほど大きく凹む）
+              const strain = Math.min(
+                0.32,
+                Math.sqrt(storedElastic / Math.max(elasticity * ent.mass * 12.0, 0.1)),
+              );
+              ent.compression = Math.max(ent.compression ?? 0, strain);
+
+              const reboundSpeed = Math.sqrt((2.0 * storedElastic) / Math.max(ent.mass, 1e-4));
+              ent.velocity[1] = reboundSpeed < 0.05 ? 0 : reboundSpeed;
             }
           }
 
