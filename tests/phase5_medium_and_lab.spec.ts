@@ -193,4 +193,89 @@ describe('空間媒質（真空・気体・水）および統合実験場（全�
     }
     expect(balloon.position[1]).toBeGreaterThan(yBeforeWater + 0.2);
   });
+
+  it('ローレンツ力テスト: 空間の渦度(磁場 ω_y)中を横切る正電荷が進行方向と垂直(Z軸)へ曲がること', () => {
+    const repo = new SpaceStateRepository(createDefaultCoreConfig());
+    repo.externalSources = [];
+    repo.entities = [
+      {
+        id: 'moving_charge',
+        materialId: 'rubber_balloon',
+        position: [0, 1.5, 0],
+        velocity: [2.0, 0, 0], // +X 方向へ移動
+        angularVelocity: [0, 0, 0],
+        radius: 0.15,
+        mass: 0.5,
+        netCharge: 2.0,
+        dipoleMoment: [0, 0, 0],
+        magneticMoment: [0, 0, 0],
+        internalHeat: 0,
+        isGrounded: false,
+        isGrabbed: false,
+        isSleeping: false,
+        domainClass: 'Visible',
+      },
+    ];
+    const core = new SpaceEngineCore(repo.config);
+    // 空間全体に +Y 向きの渦度（磁場 ω_y = 2.0）を設定
+    core.grid.wy.fill(2.0);
+    core.grid.isSleeping.fill(0);
+
+    core.step(repo.entities, repo.materials, repo.externalSources, 1 / 60);
+    // (v × ω)_z = vx * ωy > 0 により +Z 方向へ曲がること
+    expect(repo.entities[0].velocity[2]).toBeGreaterThan(0.01);
+  });
+
+  it('磁気双極子極性テスト: 平行配置の磁石は引き合い、反平行配置の磁石は反発すること', () => {
+    const runMagnetPair = (m2y: number) => {
+      const repo = new SpaceStateRepository(createDefaultCoreConfig());
+      repo.externalSources = [];
+      repo.entities = [
+        {
+          id: 'm1',
+          materialId: 'neodymium_magnet',
+          position: [-0.4, 1.5, 0],
+          velocity: [0, 0, 0],
+          angularVelocity: [0, 0, 0],
+          radius: 0.18,
+          mass: 1.0,
+          netCharge: 0,
+          dipoleMoment: [0, 0, 0],
+          magneticMoment: [0, 12.0, 0],
+          internalHeat: 0,
+          isGrounded: false,
+          isGrabbed: false,
+          isSleeping: false,
+          domainClass: 'Visible',
+        },
+        {
+          id: 'm2',
+          materialId: 'neodymium_magnet',
+          position: [0.4, 1.5, 0],
+          velocity: [0, 0, 0],
+          angularVelocity: [0, 0, 0],
+          radius: 0.18,
+          mass: 1.0,
+          netCharge: 0,
+          dipoleMoment: [0, 0, 0],
+          magneticMoment: [0, m2y, 0],
+          internalHeat: 0,
+          isGrounded: false,
+          isGrabbed: false,
+          isSleeping: false,
+          domainClass: 'Visible',
+        },
+      ];
+      const core = new SpaceEngineCore(repo.config);
+      for (let i = 0; i < 20; i++) {
+        core.step(repo.entities, repo.materials, repo.externalSources, 1 / 60);
+      }
+      return Math.abs(repo.entities[1].position[0] - repo.entities[0].position[0]);
+    };
+
+    const distParallel = runMagnetPair(12.0);
+    const distAntiParallel = runMagnetPair(-12.0);
+    // 平行（引き合い）の方が反平行（反発）より距離が短くなること
+    expect(distParallel).toBeLessThan(distAntiParallel);
+  });
 });

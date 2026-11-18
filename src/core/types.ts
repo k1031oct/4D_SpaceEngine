@@ -170,6 +170,8 @@ export interface SpaceCoreConfig {
   readonly polarizationCoupling: number;
   /** 渦度勾配→力変換の結合定数（ケルビン力） */
   readonly magneticCoupling: number;
+  /** ローレンツ力 q(v×ω) の結合定数 */
+  readonly lorentzCoupling: number;
   /** 摩擦帯電係数 */
   readonly triboRate: number;
   /** ε-Cutoff 最小エネルギー閾値 */

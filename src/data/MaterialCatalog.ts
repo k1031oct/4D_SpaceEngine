@@ -43,7 +43,7 @@ export const DEFAULT_MEDIA: readonly AmbientMediumSpec[] = [
   {
     id: 'water',
     name: '純水 (Water)',
-    density: 2.5,
+    density: 1.0,
     viscosity: 0.85,
     permittivity: 80.0,
     breakdownThreshold: 30.0,
@@ -81,7 +81,7 @@ export const DEFAULT_MATERIALS: readonly MaterialSpec[] = [
   {
     id: 'rubber_balloon',
     name: 'ゴム風船',
-    density: 0.9,
+    density: 0.08,
     electronAffinity: 0.85,
     conductivity: 0.01,
     polarizability: 0.35,

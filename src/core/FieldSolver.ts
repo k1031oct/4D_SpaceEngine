@@ -328,7 +328,7 @@ export class FieldSolver {
       let ay = backgroundField[1];
       let az = backgroundField[2];
 
-      // 空間媒質によるアルキメデスの浮力と流体抗力
+      // 空間媒質によるアルキメデスの浮力と空間フロー P との相対速度に基づく流体抗力
       if (medium && (medium.density > 0 || medium.viscosity > 0)) {
         const objDensity = Math.max(mat?.density ?? 1.0, 1e-3);
         const buoyRatio = medium.density / objDensity;
@@ -336,27 +336,39 @@ export class FieldSolver {
         ay -= backgroundField[1] * buoyRatio;
         az -= backgroundField[2] * buoyRatio;
 
-        const speed = Math.sqrt(
-          ent.velocity[0] * ent.velocity[0] +
-            ent.velocity[1] * ent.velocity[1] +
-            ent.velocity[2] * ent.velocity[2],
-        );
-        if (speed > 1e-5) {
+        // 空間パケットの運動量フロー P をサンプリングし、相対速度 (v_obj - v_flow) に抗力を適用
+        const flowX = grid.sampleField(grid.px, ent.position);
+        const flowY = grid.sampleField(grid.py, ent.position);
+        const flowZ = grid.sampleField(grid.pz, ent.position);
+        const relVx = ent.velocity[0] - flowX;
+        const relVy = ent.velocity[1] - flowY;
+        const relVz = ent.velocity[2] - flowZ;
+        const relSpeed = Math.sqrt(relVx * relVx + relVy * relVy + relVz * relVz);
+        if (relSpeed > 1e-5) {
           const area = Math.PI * ent.radius * ent.radius;
           const dragCoeff = (medium.density * 2.5 + medium.viscosity * 8.0) * (area * invMass);
-          ax -= ent.velocity[0] * speed * dragCoeff;
-          ay -= ent.velocity[1] * speed * dragCoeff;
-          az -= ent.velocity[2] * speed * dragCoeff;
+          ax -= relVx * relSpeed * dragCoeff;
+          ay -= relVy * relSpeed * dragCoeff;
+          az -= relVz * relSpeed * dragCoeff;
         }
       }
 
-      // 1. 空間場の気圧勾配 ∇Φ による静電力 F = -q * k * ∇Φ
+      // 1. 空間場の気圧勾配 ∇Φ による静電力 F = -q * k * ∇Φ およびローレンツ力 q(v × ω)
       if (Math.abs(ent.netCharge) > 1e-7) {
         const gradPhi = this.sampleSymmetricGradPhi(grid, ent.position);
         const factor = -ent.netCharge * config.chargeCoupling * invMass;
         ax += gradPhi[0] * factor;
         ay += gradPhi[1] * factor;
         az += gradPhi[2] * factor;
+
+        // 動く電荷へのローレンツ力 a = (q * k_L / m) * (v × ω)
+        const wx = grid.sampleField(grid.wx, ent.position);
+        const wy = grid.sampleField(grid.wy, ent.position);
+        const wz = grid.sampleField(grid.wz, ent.position);
+        const lorentzFactor = ent.netCharge * config.lorentzCoupling * invMass;
+        ax += (ent.velocity[1] * wz - ent.velocity[2] * wy) * lorentzFactor;
+        ay += (ent.velocity[2] * wx - ent.velocity[0] * wz) * lorentzFactor;
+        az += (ent.velocity[0] * wy - ent.velocity[1] * wx) * lorentzFactor;
       }
 
       // 2. 誘電分極による静電誘導引力 F_pol = α_pol * k_pol * ∇|∇Φ|²
@@ -375,9 +387,51 @@ export class FieldSolver {
         az += gradE2[2] * polFactor;
       }
 
-      // 3. 空間渦度エネルギー勾配によるケルビン磁力 F_mag = χ_mag * k_mag * ∇|ω|²
+      // 3. 磁気力と磁気双極子トルク
+      const magMomentSq =
+        ent.magneticMoment[0] * ent.magneticMoment[0] +
+        ent.magneticMoment[1] * ent.magneticMoment[1] +
+        ent.magneticMoment[2] * ent.magneticMoment[2];
       const chiMag = mat?.magneticSusceptibility ?? 0;
-      if (chiMag > 0.01) {
+
+      if (magMomentSq > 1e-5) {
+        // 永久磁石同士：極性に応じた双極子力 F = k_dip * ∇(m・ω) と回転トルク τ = m × ω
+        const gradMDotW = this.sampleSymmetricGradMDotW(grid, ent.position, ent.magneticMoment);
+        const dipFactor = 0.25 * config.magneticCoupling * invMass;
+        ax += gradMDotW[0] * dipFactor;
+        ay += gradMDotW[1] * dipFactor;
+        az += gradMDotW[2] * dipFactor;
+
+        // トルクによる磁気モーメントの回転整列
+        const wx = grid.sampleField(grid.wx, ent.position);
+        const wy = grid.sampleField(grid.wy, ent.position);
+        const wz = grid.sampleField(grid.wz, ent.position);
+        const mx = ent.magneticMoment[0];
+        const my = ent.magneticMoment[1];
+        const mz = ent.magneticMoment[2];
+        const tx = my * wz - mz * wy;
+        const ty = mz * wx - mx * wz;
+        const tz = mx * wy - my * wx;
+        const rotScale = 0.08 * dt * invMass;
+        ent.angularVelocity[0] = (ent.angularVelocity[0] + tx * rotScale) * 0.92;
+        ent.angularVelocity[1] = (ent.angularVelocity[1] + ty * rotScale) * 0.92;
+        ent.angularVelocity[2] = (ent.angularVelocity[2] + tz * rotScale) * 0.92;
+
+        // magneticMoment ベクトルの微小回転更新（大きさ保存）
+        const dmx = (ent.angularVelocity[1] * mz - ent.angularVelocity[2] * my) * dt;
+        const dmy = (ent.angularVelocity[2] * mx - ent.angularVelocity[0] * mz) * dt;
+        const dmz = (ent.angularVelocity[0] * my - ent.angularVelocity[1] * mx) * dt;
+        const nmx = mx + dmx;
+        const nmy = my + dmy;
+        const nmz = mz + dmz;
+        const newMag = Math.sqrt(nmx * nmx + nmy * nmy + nmz * nmz);
+        if (newMag > 1e-6) {
+          const origMag = Math.sqrt(magMomentSq);
+          const s = origMag / newMag;
+          ent.magneticMoment = [nmx * s, nmy * s, nmz * s];
+        }
+      } else if (chiMag > 0.01) {
+        // 強磁性・常磁性体（鉄球等）：空間渦度エネルギー勾配によるケルビン磁力 F_mag = χ_mag * k_mag * ∇|ω|²
         const gradW2 = this.sampleSymmetricGradVorticitySq(grid, ent.position);
         const magFactor = chiMag * config.magneticCoupling * invMass;
         ax += gradW2[0] * magFactor;
@@ -472,6 +526,27 @@ export class FieldSolver {
       (w2([pos[0] + h, pos[1], pos[2]]) - w2([pos[0] - h, pos[1], pos[2]])) * inv2h,
       (w2([pos[0], pos[1] + h, pos[2]]) - w2([pos[0], pos[1] - h, pos[2]])) * inv2h,
       (w2([pos[0], pos[1], pos[2] + h]) - w2([pos[0], pos[1], pos[2] - h])) * inv2h,
+    ];
+  }
+
+  /**
+   * 永久磁石の極性に応じた双極子力 ∇(m・ω) を対称点で評価する
+   */
+  private sampleSymmetricGradMDotW(grid: SpacePacketGrid, pos: Vec3, m: Vec3): Vec3 {
+    const h = grid.cellSize * 1.5;
+    const inv2h = 1.0 / (2.0 * h);
+
+    const mDotW = (p: Vec3): number => {
+      const wx = grid.sampleField(grid.wx, p);
+      const wy = grid.sampleField(grid.wy, p);
+      const wz = grid.sampleField(grid.wz, p);
+      return m[0] * wx + m[1] * wy + m[2] * wz;
+    };
+
+    return [
+      (mDotW([pos[0] + h, pos[1], pos[2]]) - mDotW([pos[0] - h, pos[1], pos[2]])) * inv2h,
+      (mDotW([pos[0], pos[1] + h, pos[2]]) - mDotW([pos[0], pos[1] - h, pos[2]])) * inv2h,
+      (mDotW([pos[0], pos[1], pos[2] + h]) - mDotW([pos[0], pos[1], pos[2] - h])) * inv2h,
     ];
   }
 

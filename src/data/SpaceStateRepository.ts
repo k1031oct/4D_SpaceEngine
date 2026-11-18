@@ -28,6 +28,7 @@ export function createDefaultCoreConfig(): SpaceCoreConfig {
     chargeCoupling: 0.35,
     polarizationCoupling: 2.8,
     magneticCoupling: 6.5,
+    lorentzCoupling: 0.6,
     triboRate: 1.5,
     epsilonCutoff: 1e-4,
     sleepVelocityThreshold: 0.06,

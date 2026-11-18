@@ -75,8 +75,11 @@ export class ContactSolver {
           }
 
           if (velAlongNormal < 0) {
+            const isElectrostaticAdhesion =
+              (Math.abs(a.netCharge) > 0.5 && (matB?.polarizability ?? 0) > 0.7) ||
+              (Math.abs(b.netCharge) > 0.5 && (matA?.polarizability ?? 0) > 0.7);
             const e =
-              Math.abs(velAlongNormal) < 0.2
+              isElectrostaticAdhesion || Math.abs(velAlongNormal) < 0.2
                 ? 0.0
                 : Math.min(matA?.restitution ?? 0.2, matB?.restitution ?? 0.2);
 
