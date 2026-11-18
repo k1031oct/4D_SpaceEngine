@@ -1,5 +1,5 @@
 import type { SimilarityInsight } from '../core/SimilarityAnalyzer';
-import type { DebugOverlayMode, PresetId, Vec3 } from '../core/types';
+import type { DebugOverlayMode, MediumId, PresetId, Vec3 } from '../core/types';
 
 /**
  * 描画層へ渡す軽量エンティティスナップショット
@@ -22,6 +22,8 @@ export interface EntityRenderSnapshot {
 export interface SandboxUiState {
   readonly isRunning: boolean;
   readonly currentPreset: PresetId;
+  readonly currentMediumId: MediumId;
+  readonly activeDischargeCount: number;
   readonly perceptualScaleLog10: number;
   readonly manualScaleLog10: number | null;
   readonly activePacketCount: number;

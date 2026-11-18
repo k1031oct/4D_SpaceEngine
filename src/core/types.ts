@@ -10,13 +10,34 @@ export type DomainClass = 'Visible' | 'Projected' | 'Absorbed';
 
 export type DebugOverlayMode = 'none' | 'pressure' | 'vorticity' | 'octree';
 
+export type MediumId = 'vacuum' | 'air' | 'helium' | 'neon' | 'water';
+
 export type PresetId =
   | 'gravity_rest'
   | 'dipole_pair'
   | 'repulsion_pair'
   | 'tribo_induction'
   | 'magnet_attraction'
-  | 'multi_scale_solar';
+  | 'multi_scale_solar'
+  | 'sandbox_lab';
+
+/**
+ * 空間を満たす背景媒質（真空・気体・液体）の物性定義
+ */
+export interface AmbientMediumSpec {
+  readonly id: MediumId;
+  readonly name: string;
+  /** 背景密度 ρ_0（浮力・流体抗力の源） */
+  readonly density: number;
+  /** 粘性率 ν_0 */
+  readonly viscosity: number;
+  /** 背景誘電率 ε_r（空間パケット stiffness の基準値） */
+  readonly permittivity: number;
+  /** 絶縁破壊電界閾値（|∇Φ| 超過で気体電離・空中放電が発生） */
+  readonly breakdownThreshold: number;
+  /** 環境基準温度（内部振動エネルギーベースライン） */
+  readonly ambientHeat: number;
+}
 
 /**
  * マテリアル基礎物性パラメータ
@@ -167,4 +188,5 @@ export interface CoreStepMetrics {
   readonly sleepingPacketRatio: number;
   readonly totalEnergy: number;
   readonly dtEffective: number;
+  readonly activeDischargeCount: number;
 }

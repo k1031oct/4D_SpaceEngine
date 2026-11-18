@@ -1,5 +1,12 @@
 import { SpacePacketGrid } from './SpacePacketGrid';
-import type { CoreStepMetrics, MaterialSpec, SpaceCoreConfig, SpaceEntity, Vec3 } from './types';
+import type {
+  AmbientMediumSpec,
+  CoreStepMetrics,
+  MaterialSpec,
+  SpaceCoreConfig,
+  SpaceEntity,
+  Vec3,
+} from './types';
 
 /**
  * 空間場ソルバ（Space Field Solver）
@@ -17,6 +24,7 @@ export class FieldSolver {
     backgroundField: Vec3,
     rawDt: number,
     config: SpaceCoreConfig,
+    medium?: AmbientMediumSpec,
   ): CoreStepMetrics {
     // 1. スケール不変な無次元化係数（基準 L_ref = 0.25m に対する比率）
     const scaleRatio = Math.max(grid.cellSize / 0.25, 1e-6);
@@ -36,20 +44,34 @@ export class FieldSolver {
     this.injectSources(grid, entities);
 
     // 3. サブステップでの空間場更新（緩和・フロー・渦度・散逸）
+    const permittivity = Math.max(0.1, medium?.permittivity ?? 1.0);
     let activeCount = 0;
     let sleepingCount = 0;
     for (let s = 0; s < substeps; s++) {
-      const stats = this.stepGrid(grid, dtSub, config, scaledDiffusion);
+      const stats = this.stepGrid(grid, dtSub, config, scaledDiffusion, permittivity);
       if (s === substeps - 1) {
         activeCount = stats.activeCount;
         sleepingCount = stats.sleepingCount;
       }
     }
 
-    // 4. 空間場 → エンティティへの遠隔力積分
-    this.applyFieldForcesToEntities(grid, entities, materials, backgroundField, clampedRawDt, config);
+    // 4. 空間場 → エンティティへの遠隔力積分（媒質の浮力・流体抗力含む）
+    this.applyFieldForcesToEntities(
+      grid,
+      entities,
+      materials,
+      backgroundField,
+      clampedRawDt,
+      config,
+      medium,
+    );
 
-    // 5. 総エネルギーの集計（監視用）
+    // 5. 空間媒質の絶縁破壊による空中プラズマ放電
+    const activeDischargeCount = medium
+      ? this.processAtmosphericBreakdown(grid, entities, medium, clampedRawDt)
+      : 0;
+
+    // 6. 総エネルギーの集計（監視用）
     const totalEnergy = this.computeTotalEnergy(grid, entities);
     const sleepingRatio = grid.count > 0 ? sleepingCount / grid.count : 0;
 
@@ -58,6 +80,7 @@ export class FieldSolver {
       sleepingPacketRatio: sleepingRatio,
       totalEnergy,
       dtEffective: dtSub,
+      activeDischargeCount,
     };
   }
 
@@ -120,6 +143,7 @@ export class FieldSolver {
     dt: number,
     config: SpaceCoreConfig,
     scaledDiffusion: number,
+    permittivity: number,
   ): { activeCount: number; sleepingCount: number } {
     const { nx, ny, nz } = grid;
     const invDx = 1.0 / grid.cellSize;
@@ -183,7 +207,7 @@ export class FieldSolver {
           activeCount++;
 
           const phiC = grid.phi[idx];
-          const stiff = Math.max(0.1, grid.stiffness[idx]);
+          const stiff = Math.max(0.1, grid.stiffness[idx] * permittivity);
 
           // ポアソン緩和（ラプラシアンによる歪みの均質化）
           const lapPhi =
@@ -291,6 +315,7 @@ export class FieldSolver {
     backgroundField: Vec3,
     dt: number,
     config: SpaceCoreConfig,
+    medium?: AmbientMediumSpec,
   ): void {
     for (const ent of entities) {
       if (ent.domainClass !== 'Visible' || ent.isGrabbed) continue;
@@ -302,6 +327,28 @@ export class FieldSolver {
       let ax = backgroundField[0];
       let ay = backgroundField[1];
       let az = backgroundField[2];
+
+      // 空間媒質によるアルキメデスの浮力と流体抗力
+      if (medium && (medium.density > 0 || medium.viscosity > 0)) {
+        const objDensity = Math.max(mat?.density ?? 1.0, 1e-3);
+        const buoyRatio = medium.density / objDensity;
+        ax -= backgroundField[0] * buoyRatio;
+        ay -= backgroundField[1] * buoyRatio;
+        az -= backgroundField[2] * buoyRatio;
+
+        const speed = Math.sqrt(
+          ent.velocity[0] * ent.velocity[0] +
+            ent.velocity[1] * ent.velocity[1] +
+            ent.velocity[2] * ent.velocity[2],
+        );
+        if (speed > 1e-5) {
+          const area = Math.PI * ent.radius * ent.radius;
+          const dragCoeff = (medium.density * 2.5 + medium.viscosity * 8.0) * (area * invMass);
+          ax -= ent.velocity[0] * speed * dragCoeff;
+          ay -= ent.velocity[1] * speed * dragCoeff;
+          az -= ent.velocity[2] * speed * dragCoeff;
+        }
+      }
 
       // 1. 空間場の気圧勾配 ∇Φ による静電力 F = -q * k * ∇Φ
       if (Math.abs(ent.netCharge) > 1e-7) {
@@ -426,6 +473,69 @@ export class FieldSolver {
       (w2([pos[0], pos[1] + h, pos[2]]) - w2([pos[0], pos[1] - h, pos[2]])) * inv2h,
       (w2([pos[0], pos[1], pos[2] + h]) - w2([pos[0], pos[1], pos[2] - h])) * inv2h,
     ];
+  }
+
+  /**
+   * 空間媒質の絶縁破壊閾値を超えた高勾配領域で非接触の空中プラズマ放電を発生させる
+   */
+  private processAtmosphericBreakdown(
+    grid: SpacePacketGrid,
+    entities: SpaceEntity[],
+    medium: AmbientMediumSpec,
+    dt: number,
+  ): number {
+    let dischargeCount = 0;
+    const threshold = medium.breakdownThreshold;
+    if (threshold >= 1e5) return 0;
+
+    for (let i = 0; i < entities.length; i++) {
+      const a = entities[i];
+      if (a.domainClass !== 'Visible') continue;
+
+      for (let j = i + 1; j < entities.length; j++) {
+        const b = entities[j];
+        if (b.domainClass !== 'Visible') continue;
+
+        const dx = b.position[0] - a.position[0];
+        const dy = b.position[1] - a.position[1];
+        const dz = b.position[2] - a.position[2];
+        const dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
+        const gap = dist - (a.radius + b.radius);
+
+        // 近接（非接触ギャップ < 0.75m）かつ電位差がある場合のみ判定
+        if (gap <= 0 || gap > 0.75) continue;
+
+        const mid: Vec3 = [
+          (a.position[0] + b.position[0]) * 0.5,
+          (a.position[1] + b.position[1]) * 0.5,
+          (a.position[2] + b.position[2]) * 0.5,
+        ];
+        const gMid = grid.samplePhiGradient(mid);
+        const fieldMag = Math.sqrt(gMid[0] * gMid[0] + gMid[1] * gMid[1] + gMid[2] * gMid[2]);
+
+        // 空間場勾配または相対電荷差による局所電界が絶縁破壊閾値を超えたらプラズマ放電
+        const localE = Math.max(fieldMag, Math.abs(a.netCharge - b.netCharge) / Math.max(gap, 0.05));
+        if (localE > threshold) {
+          dischargeCount++;
+          const rate = Math.min(1.0, 8.0 * dt);
+          if (a.isGrounded && !b.isGrounded) {
+            b.netCharge *= 1.0 - rate;
+            b.internalHeat += 0.2 * dt;
+          } else if (b.isGrounded && !a.isGrounded) {
+            a.netCharge *= 1.0 - rate;
+            a.internalHeat += 0.2 * dt;
+          } else {
+            const avgQ = (a.netCharge + b.netCharge) * 0.5;
+            a.netCharge += (avgQ - a.netCharge) * rate;
+            b.netCharge += (avgQ - b.netCharge) * rate;
+            a.internalHeat += 0.15 * dt;
+            b.internalHeat += 0.15 * dt;
+          }
+        }
+      }
+    }
+
+    return dischargeCount;
   }
 
   /**

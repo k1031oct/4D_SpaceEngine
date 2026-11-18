@@ -78,11 +78,26 @@ SpaceEntity
   └─ domainClass: "Visible" | "Projected" | "Absorbed"
 ```
 
+### 2.2.1 空間媒質（`AmbientMediumSpec`）
+
+```
+AmbientMediumSpec
+  ├─ id: string                 ("vacuum" | "air" | "neon" | "water")
+  ├─ name: string
+  ├─ density: number            (背景密度 ρ_0：浮力・流体抗力の源)
+  ├─ viscosity: number          (粘性率：速度減衰)
+  ├─ permittivity: number       (背景誘電率 ε_r：パケット stiffness の基準値)
+  ├─ breakdownThreshold: number (絶縁破壊電界閾値：|∇Φ| 超過で空中プラズマ放電)
+  └─ ambientHeat: number        (環境基準温度 U_0)
+```
+
 ### 2.3 UI状態（`SandboxUiState`）
 
 ```
 SandboxUiState
   ├─ isRunning: boolean         (シミュレーション再生/停止)
+  ├─ currentMediumId: string    (現在の空間媒質: vacuum / air / neon / water)
+  ├─ activeDischargeCount: number (空中絶縁破壊プラズマ放電の発生数)
   ├─ perceptualScaleLog10: number (現在の知覚スケール log10(L_base))
   ├─ activePacketCount: number  (稼働中の空間パケット数)
   ├─ sleepingPacketRatio: number (ε-Cutoff による計算省略率 0..1)

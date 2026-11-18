@@ -143,24 +143,33 @@
   <body>
     <div id="canvas-container">
       <div id="hud">
-        <h1>4D Scale Space Engine (Phase 3)</h1>
+        <h1>4D Scale Space Engine</h1>
         <div class="metric-row"><span class="metric-label">知覚スケール log₁₀L</span><span id="m-scale" class="metric-val">-0.60</span></div>
         <div class="metric-row"><span class="metric-label">領域 (Vis/Proj/Abs)</span><span id="m-domains" class="metric-val">0 / 0 / 0</span></div>
         <div class="metric-row"><span class="metric-label">稼働パケット数</span><span id="m-packets" class="metric-val">0</span></div>
         <div class="metric-row"><span class="metric-label">ε-Cutoff 省略率</span><span id="m-sleep" class="metric-val">0.0%</span></div>
         <div class="metric-row"><span class="metric-label">実効 Δt (CFL)</span><span id="m-dt" class="metric-val">0.000s</span></div>
+        <div class="metric-row"><span class="metric-label">空中放電 (プラズマ)</span><span id="m-discharge" class="metric-val">0</span></div>
         <div class="metric-row"><span class="metric-label">総エネルギー</span><span id="m-energy" class="metric-val">0.000</span></div>
         <div class="metric-row"><span class="metric-label">選択オブジェクト</span><span id="m-selected" class="metric-val">なし</span></div>
         <div class="controls">
           <button id="btn-toggle" class="primary">一時停止</button>
           <button id="btn-reset">リセット</button>
           <select id="sel-preset">
+            <option value="sandbox_lab">0. 統合実験場（全現象同時再現）</option>
             <option value="gravity_rest">1. 重力静止収束テスト</option>
             <option value="dipole_pair">2. 空間歪み双極子（引力）</option>
             <option value="repulsion_pair">3. 同符号空間歪み（斥力）</option>
             <option value="tribo_induction">4. 摩擦帯電・静電誘導・アース</option>
             <option value="magnet_attraction">5. ネオジム磁石・鉄球吸着</option>
             <option value="multi_scale_solar">6. 4Dマルチスケール（机上↔宇宙）</option>
+          </select>
+          <select id="sel-medium">
+            <option value="air">空間媒質: 標準大気 (Air)</option>
+            <option value="vacuum">空間媒質: 真空 (Vacuum)</option>
+            <option value="helium">空間媒質: ヘリウム (He)</option>
+            <option value="neon">空間媒質: ネオンガス (Ne)</option>
+            <option value="water">空間媒質: 純水 (Water)</option>
           </select>
           <select id="sel-overlay">
             <option value="pressure">空間可視化: 気圧偏差 Φ</option>

@@ -1,6 +1,13 @@
 import { SimilarityAnalyzer } from '../core/SimilarityAnalyzer';
 import { SpaceEngineCore } from '../core/SpaceEngineCore';
-import type { DebugOverlayMode, ObserverState, PresetId, SpaceEntity, Vec3 } from '../core/types';
+import type {
+  DebugOverlayMode,
+  MediumId,
+  ObserverState,
+  PresetId,
+  SpaceEntity,
+  Vec3,
+} from '../core/types';
 import { SpaceStateRepository } from '../data/SpaceStateRepository';
 import type { EntityRenderSnapshot, SandboxUiState } from './SandboxUiState';
 
@@ -40,6 +47,7 @@ export class SandboxViewModel {
     sleepingPacketRatio: 0,
     totalEnergy: 0,
     dtEffective: 0,
+    activeDischargeCount: 0,
   };
   private listeners: UiStateListener[] = [];
 
@@ -61,9 +69,10 @@ export class SandboxViewModel {
    */
   public step(rawDt: number): void {
     if (this.isRunning) {
-      // multi_scale_solar の場合は観測者の知覚スケーリングを有効化、それ以外は Phase 1/2 互換で安定動作
+      // multi_scale_solar / sandbox_lab の場合は観測者の知覚スケーリングを有効化
       const useObserver =
         this.repository.currentPreset === 'multi_scale_solar' ||
+        this.repository.currentPreset === 'sandbox_lab' ||
         this.observer.manualScaleLog10 !== null;
 
       // マクロスケールでは机（floorY）拘束を外して自由宇宙空間へ
@@ -79,6 +88,7 @@ export class SandboxViewModel {
         this.repository.externalSources,
         rawDt,
         useObserver ? this.observer : undefined,
+        this.repository.getCurrentMedium(),
       );
       this.lastMetrics = res.metrics;
       this.repository.entities = res.entities;
@@ -96,13 +106,18 @@ export class SandboxViewModel {
     this.core.config = { ...this.repository.config };
     this.core.resetField();
     this.selectedEntityId = null;
-    if (presetId === 'multi_scale_solar') {
+    if (presetId === 'multi_scale_solar' || presetId === 'sandbox_lab') {
       this.observer.manualScaleLog10 = -0.6;
       this.observer.focusPoint = [0, 1.5, 0];
     } else {
       this.observer.manualScaleLog10 = null;
       this.observer.focusPoint = [...this.repository.config.center];
     }
+    this.notify();
+  }
+
+  public setMedium(mediumId: MediumId): void {
+    this.repository.currentMediumId = mediumId;
     this.notify();
   }
 
@@ -272,6 +287,8 @@ export class SandboxViewModel {
     return {
       isRunning: this.isRunning,
       currentPreset: this.repository.currentPreset,
+      currentMediumId: this.repository.currentMediumId,
+      activeDischargeCount: this.lastMetrics.activeDischargeCount,
       perceptualScaleLog10: Math.log10(this.core.grid.cellSize),
       manualScaleLog10: this.observer.manualScaleLog10,
       activePacketCount: this.lastMetrics.activePacketCount,

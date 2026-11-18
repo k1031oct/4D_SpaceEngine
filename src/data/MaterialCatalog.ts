@@ -1,4 +1,63 @@
-import type { MaterialSpec } from '../core/types';
+import type { AmbientMediumSpec, MaterialSpec, MediumId } from '../core/types';
+
+/**
+ * 空間を満たす標準媒質（真空・気体・液体）カタログ
+ */
+export const DEFAULT_MEDIA: readonly AmbientMediumSpec[] = [
+  {
+    id: 'vacuum',
+    name: '真空 (Vacuum)',
+    density: 0.0,
+    viscosity: 0.0,
+    permittivity: 1.0,
+    breakdownThreshold: 1e6,
+    ambientHeat: 0.0,
+  },
+  {
+    id: 'air',
+    name: '標準大気 (Air)',
+    density: 0.0012,
+    viscosity: 0.045,
+    permittivity: 1.0006,
+    breakdownThreshold: 12.0,
+    ambientHeat: 0.05,
+  },
+  {
+    id: 'helium',
+    name: 'ヘリウム (He)',
+    density: 0.00018,
+    viscosity: 0.008,
+    permittivity: 1.0001,
+    breakdownThreshold: 7.0,
+    ambientHeat: 0.05,
+  },
+  {
+    id: 'neon',
+    name: 'ネオンガス (Ne)',
+    density: 0.0009,
+    viscosity: 0.012,
+    permittivity: 1.0001,
+    breakdownThreshold: 3.5,
+    ambientHeat: 0.05,
+  },
+  {
+    id: 'water',
+    name: '純水 (Water)',
+    density: 2.5,
+    viscosity: 0.85,
+    permittivity: 80.0,
+    breakdownThreshold: 30.0,
+    ambientHeat: 0.1,
+  },
+];
+
+export function createMediumMap(): Map<MediumId, AmbientMediumSpec> {
+  const map = new Map<MediumId, AmbientMediumSpec>();
+  for (const m of DEFAULT_MEDIA) {
+    map.set(m.id, m);
+  }
+  return map;
+}
 
 /**
  * 標準マテリアル物性辞書

@@ -5,6 +5,7 @@ import { FieldSolver } from './FieldSolver';
 import { PerceptualScaler } from './PerceptualScaler';
 import { SpacePacketGrid } from './SpacePacketGrid';
 import type {
+  AmbientMediumSpec,
   CoreStepMetrics,
   MaterialSpec,
   ObserverState,
@@ -63,6 +64,7 @@ export class SpaceEngineCore {
     externalSources: readonly ProjectedExternalSource[],
     rawDt: number,
     observer?: ObserverState,
+    medium?: AmbientMediumSpec,
   ): { metrics: CoreStepMetrics; entities: SpaceEntity[] } {
     let activeEntities = entities;
     let combinedExternalSources = [...externalSources];
@@ -97,7 +99,7 @@ export class SpaceEngineCore {
     // 2. 境界シェル射影（Projected 領域からの重力・遠方ポテンシャル焼き付け）
     const backgroundField = this.boundaryProjector.project(this.grid, combinedExternalSources);
 
-    // 3. 空間場更新（ソース注入・ポアソン緩和・渦度・散逸・遠隔力積分）
+    // 3. 空間場更新（ソース注入・ポアソン緩和・渦度・散逸・遠隔力積分・媒質効果）
     const metrics = this.fieldSolver.solve(
       this.grid,
       activeEntities,
@@ -105,6 +107,7 @@ export class SpaceEngineCore {
       backgroundField,
       rawDt,
       this.config,
+      medium,
     );
 
     // 4. サブグリッド接触・静止摩擦ロック解決

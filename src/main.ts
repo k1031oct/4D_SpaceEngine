@@ -1,4 +1,4 @@
-import type { DebugOverlayMode, PresetId } from './core/types';
+import type { DebugOverlayMode, MediumId, PresetId } from './core/types';
 import { ThreeViewAdapter } from './view/ThreeViewAdapter';
 import type { SandboxUiState } from './viewmodel/SandboxUiState';
 import { SandboxViewModel } from './viewmodel/SandboxViewModel';
@@ -13,6 +13,7 @@ const elDomains = document.getElementById('m-domains')!;
 const elPackets = document.getElementById('m-packets')!;
 const elSleep = document.getElementById('m-sleep')!;
 const elDt = document.getElementById('m-dt')!;
+const elDischarge = document.getElementById('m-discharge')!;
 const elEnergy = document.getElementById('m-energy')!;
 const elSelected = document.getElementById('m-selected')!;
 const lblScaleVal = document.getElementById('lbl-scale-val')!;
@@ -20,6 +21,7 @@ const lblScaleVal = document.getElementById('lbl-scale-val')!;
 const btnToggle = document.getElementById('btn-toggle') as HTMLButtonElement;
 const btnReset = document.getElementById('btn-reset') as HTMLButtonElement;
 const selPreset = document.getElementById('sel-preset') as HTMLSelectElement;
+const selMedium = document.getElementById('sel-medium') as HTMLSelectElement;
 const selOverlay = document.getElementById('sel-overlay') as HTMLSelectElement;
 const rngScale = document.getElementById('rng-scale') as HTMLInputElement;
 
@@ -42,6 +44,7 @@ function updateHud(state: SandboxUiState): void {
   elPackets.textContent = `${state.activePacketCount} / ${viewModel.core.grid.count}`;
   elSleep.textContent = `${(state.sleepingPacketRatio * 100).toFixed(1)}%`;
   elDt.textContent = `${state.dtEffective.toFixed(4)}s`;
+  elDischarge.textContent = `${state.activeDischargeCount}`;
   elEnergy.textContent = state.totalEnergy.toFixed(3);
   btnToggle.textContent = state.isRunning ? '一時停止' : '再開';
   lblScaleVal.textContent =
@@ -70,6 +73,9 @@ btnToggle.addEventListener('click', () => viewModel.togglePlay());
 btnReset.addEventListener('click', () => viewModel.reset());
 selPreset.addEventListener('change', () => {
   viewModel.loadPreset(selPreset.value as PresetId);
+});
+selMedium.addEventListener('change', () => {
+  viewModel.setMedium(selMedium.value as MediumId);
 });
 selOverlay.addEventListener('change', () => {
   viewModel.setDebugOverlayMode(selOverlay.value as DebugOverlayMode);

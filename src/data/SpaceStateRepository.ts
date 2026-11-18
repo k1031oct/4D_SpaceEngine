@@ -1,11 +1,13 @@
 import type {
+  AmbientMediumSpec,
   MaterialSpec,
+  MediumId,
   PresetId,
   ProjectedExternalSource,
   SpaceCoreConfig,
   SpaceEntity,
 } from '../core/types';
-import { createMaterialMap } from './MaterialCatalog';
+import { createMaterialMap, createMediumMap } from './MaterialCatalog';
 
 /**
  * デフォルトのPhase 1単一スケール空間設定
@@ -39,15 +41,22 @@ export function createDefaultCoreConfig(): SpaceCoreConfig {
  */
 export class SpaceStateRepository {
   public readonly materials: Map<string, MaterialSpec>;
+  public readonly media: Map<MediumId, AmbientMediumSpec>;
   public config: SpaceCoreConfig;
   public entities: SpaceEntity[] = [];
   public externalSources: ProjectedExternalSource[] = [];
-  public currentPreset: PresetId = 'gravity_rest';
+  public currentPreset: PresetId = 'sandbox_lab';
+  public currentMediumId: MediumId = 'air';
 
   constructor(config: SpaceCoreConfig = createDefaultCoreConfig()) {
     this.materials = createMaterialMap();
+    this.media = createMediumMap();
     this.config = config;
-    this.loadPreset('gravity_rest');
+    this.loadPreset('sandbox_lab');
+  }
+
+  public getCurrentMedium(): AmbientMediumSpec {
+    return this.media.get(this.currentMediumId) ?? this.media.get('air')!;
   }
 
   /**
@@ -127,6 +136,23 @@ export class SpaceStateRepository {
         moon,
         this.createEntity('desk_ball_a', 'rubber_balloon', [-0.5, 0.8, 0.0], 0.18, 0.5, 2.0),
         this.createEntity('desk_ball_b', 'paper', [0.5, 0.8, 0.0], 0.16, 0.3, -2.0),
+      ];
+    } else if (presetId === 'sandbox_lab') {
+      // 統合実験場：境界シェル地球重力・摩擦帯電・静電誘導・磁石吸着・アース放電・空間媒質が全て共存する実験場
+      this.externalSources = [];
+      const earth: SpaceEntity = {
+        ...this.createEntity('earth_projected', 'steel_ground', [0, -50.0, 0], 18.0, 1e6, 0),
+        isGrounded: false,
+        gravityStrength: 9.8 * 50.0 * 50.0,
+      };
+      this.entities = [
+        earth,
+        this.createEntity('lab_balloon', 'rubber_balloon', [-1.0, 0.24, -0.3], 0.24, 0.35, 0),
+        this.createEntity('lab_wool', 'wool_cloth', [-0.45, 0.2, -0.3], 0.2, 0.8, 0),
+        this.createEntity('lab_paper', 'paper', [0.1, 0.12, -0.3], 0.12, 0.08, 0),
+        this.createEntity('lab_earth_plate', 'steel_ground', [1.1, 0.25, -0.3], 0.25, 10.0, 0),
+        this.createEntity('lab_magnet', 'neodymium_magnet', [-0.5, 0.22, 0.55], 0.22, 1.2, 0),
+        this.createEntity('lab_iron', 'iron_ball', [0.2, 0.16, 0.55], 0.16, 0.5, 0),
       ];
     }
   }
