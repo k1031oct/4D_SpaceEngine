@@ -3,6 +3,7 @@ import { ContactSolver } from './ContactSolver';
 import { DualPacketizer } from './DualPacketizer';
 import { FieldSolver } from './FieldSolver';
 import { PerceptualScaler } from './PerceptualScaler';
+import { PhaseTransitionSolver } from './PhaseTransitionSolver';
 import { SpacePacketGrid } from './SpacePacketGrid';
 import type {
   AmbientMediumSpec,
@@ -28,6 +29,7 @@ export class SpaceEngineCore {
   private readonly boundaryProjector = new BoundaryProjector();
   private readonly fieldSolver = new FieldSolver();
   private readonly contactSolver = new ContactSolver();
+  private readonly phaseSolver = new PhaseTransitionSolver();
   private absorbedBackgroundEnergy = 0;
 
   constructor(config: SpaceCoreConfig) {
@@ -113,6 +115,9 @@ export class SpaceEngineCore {
     // 4. サブグリッド接触・静止摩擦ロック解決
     const effectiveFrameDt = Math.min(Math.max(rawDt, 1e-5), 0.05);
     this.contactSolver.solve(activeEntities, materials, effectiveFrameDt, this.config);
+
+    // 5. 相転移（固体/液体/気体）と環境熱緩和
+    this.phaseSolver.solve(activeEntities, materials, effectiveFrameDt, medium);
 
     return {
       metrics: {

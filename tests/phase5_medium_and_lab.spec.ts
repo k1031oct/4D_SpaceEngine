@@ -278,4 +278,40 @@ describe('空間媒質（真空・気体・水）および統合実験場（全�
     // 平行（引き合い）の方が反平行（反発）より距離が短くなること
     expect(distParallel).toBeLessThan(distAntiParallel);
   });
+
+  it('相転移テスト: 加熱により固体→液体→気体へ遷移し、気化時の低密度化による浮力で自動上昇し、冷却で再凝固すること', () => {
+    const vm = new SandboxViewModel();
+    vm.loadPreset('sandbox_lab');
+    vm.setMedium('air');
+
+    const ice = vm.repository.entities.find((e) => e.id === 'lab_ice')!;
+    vm.grabEntity(ice.id);
+    vm.releaseEntity(ice.id);
+
+    // 1. 初期状態：固体
+    vm.step(1 / 60);
+    expect(ice.phaseState).toBe('solid');
+    const solidY = ice.position[1];
+
+    // 2. 融点以上に加熱：液体（水）へ融解
+    vm.addHeatToSelected(2.5);
+    vm.step(1 / 60);
+    expect(ice.phaseState).toBe('liquid');
+
+    // 3. 沸点以上に加熱：気体（水蒸気）へ気化し、密度低下による浮力で大気中を上昇
+    vm.addHeatToSelected(4.0);
+    for (let i = 0; i < 30; i++) {
+      vm.step(1 / 60);
+    }
+    expect(ice.phaseState).toBe('gas');
+    expect(ice.position[1]).toBeGreaterThan(solidY + 0.15);
+
+    // 4. 冷却：再び固体に戻り重力で下向きに落下し始めること
+    vm.addHeatToSelected(-10.0);
+    for (let i = 0; i < 45; i++) {
+      vm.step(1 / 60);
+    }
+    expect(ice.phaseState).toBe('solid');
+    expect(ice.velocity[1]).toBeLessThan(0);
+  });
 });

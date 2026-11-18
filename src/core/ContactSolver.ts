@@ -137,23 +137,26 @@ export class ContactSolver {
             }
           }
 
-          // 水平方向の動摩擦減衰
-          const muD = mat?.dynamicFriction ?? 0.45;
+          // 水平方向の動摩擦減衰（液体・気体は摩擦が極めて小さい）
+          const isFluid = ent.phaseState === 'liquid' || ent.phaseState === 'gas';
+          const muD = isFluid ? 0.02 : (mat?.dynamicFriction ?? 0.45);
           const damping = Math.max(0, 1.0 - muD * 8.0 * dt);
           ent.velocity[0] *= damping;
           ent.velocity[2] *= damping;
 
-          // 静止摩擦ロック判定
-          const speedSq =
-            ent.velocity[0] * ent.velocity[0] +
-            ent.velocity[1] * ent.velocity[1] +
-            ent.velocity[2] * ent.velocity[2];
-          const thresh = config.sleepVelocityThreshold;
-          if (speedSq < thresh * thresh) {
-            ent.velocity[0] = 0;
-            ent.velocity[1] = 0;
-            ent.velocity[2] = 0;
-            ent.isSleeping = true;
+          // 静止摩擦ロック判定（液体・気体は静止ロックしない）
+          if (!isFluid) {
+            const speedSq =
+              ent.velocity[0] * ent.velocity[0] +
+              ent.velocity[1] * ent.velocity[1] +
+              ent.velocity[2] * ent.velocity[2];
+            const thresh = config.sleepVelocityThreshold;
+            if (speedSq < thresh * thresh) {
+              ent.velocity[0] = 0;
+              ent.velocity[1] = 0;
+              ent.velocity[2] = 0;
+              ent.isSleeping = true;
+            }
           }
         }
 

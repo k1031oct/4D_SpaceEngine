@@ -121,6 +121,21 @@ export class SandboxViewModel {
     this.notify();
   }
 
+  /**
+   * 選択中のオブジェクト（未選択時は先頭のVisibleオブジェクト）へ熱エネルギーを加減算する
+   */
+  public addHeatToSelected(deltaHeat: number): void {
+    const target =
+      (this.selectedEntityId
+        ? this.repository.entities.find((e) => e.id === this.selectedEntityId)
+        : undefined) ?? this.repository.entities.find((e) => e.domainClass === 'Visible');
+    if (!target) return;
+    target.internalHeat = Math.max(0, target.internalHeat + deltaHeat);
+    target.isSleeping = false;
+    this.selectedEntityId = target.id;
+    this.notify();
+  }
+
   public reset(): void {
     this.loadPreset(this.repository.currentPreset);
   }
@@ -258,6 +273,7 @@ export class SandboxViewModel {
           radius: e.radius,
           colorHex: mat?.colorHex ?? 0xffffff,
           netCharge: e.netCharge,
+          phaseState: e.phaseState ?? 'solid',
           isSleeping: e.isSleeping,
           isGrabbed: e.isGrabbed,
         });
@@ -279,6 +295,7 @@ export class SandboxViewModel {
           charge: ent.netCharge,
           velocityMag: speed,
           heat: ent.internalHeat,
+          phaseState: ent.phaseState ?? 'solid',
           isSleeping: ent.isSleeping,
         };
       }

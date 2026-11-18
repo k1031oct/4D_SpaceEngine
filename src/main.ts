@@ -20,6 +20,8 @@ const lblScaleVal = document.getElementById('lbl-scale-val')!;
 
 const btnToggle = document.getElementById('btn-toggle') as HTMLButtonElement;
 const btnReset = document.getElementById('btn-reset') as HTMLButtonElement;
+const btnHeat = document.getElementById('btn-heat') as HTMLButtonElement;
+const btnCool = document.getElementById('btn-cool') as HTMLButtonElement;
 const selPreset = document.getElementById('sel-preset') as HTMLSelectElement;
 const selMedium = document.getElementById('sel-medium') as HTMLSelectElement;
 const selOverlay = document.getElementById('sel-overlay') as HTMLSelectElement;
@@ -58,7 +60,8 @@ function updateHud(state: SandboxUiState): void {
 
   if (state.selectedEntityMetrics) {
     const m = state.selectedEntityMetrics;
-    elSelected.textContent = `${m.name} (q=${m.charge.toFixed(2)}, v=${m.velocityMag.toFixed(2)}${m.isSleeping ? ' 静止' : ''})`;
+    const phaseJp = m.phaseState === 'gas' ? '気体' : m.phaseState === 'liquid' ? '液体' : '固体';
+    elSelected.textContent = `${m.name}[${phaseJp}] (q=${m.charge.toFixed(2)}, U=${m.heat.toFixed(1)}, v=${m.velocityMag.toFixed(2)})`;
   } else {
     elSelected.textContent = 'なし';
   }
@@ -71,6 +74,8 @@ viewModel.subscribe((state) => {
 
 btnToggle.addEventListener('click', () => viewModel.togglePlay());
 btnReset.addEventListener('click', () => viewModel.reset());
+btnHeat.addEventListener('click', () => viewModel.addHeatToSelected(2.5));
+btnCool.addEventListener('click', () => viewModel.addHeatToSelected(-2.5));
 selPreset.addEventListener('change', () => {
   viewModel.loadPreset(selPreset.value as PresetId);
 });

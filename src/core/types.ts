@@ -8,6 +8,8 @@ export type Vec3 = [number, number, number];
 
 export type DomainClass = 'Visible' | 'Projected' | 'Absorbed';
 
+export type PhaseState = 'solid' | 'liquid' | 'gas';
+
 export type DebugOverlayMode = 'none' | 'pressure' | 'vorticity' | 'octree';
 
 export type MediumId = 'vacuum' | 'air' | 'helium' | 'neon' | 'water';
@@ -57,8 +59,10 @@ export interface MaterialSpec {
   readonly spinMagnitude: number;
   /** 磁気感受率（∇|ω|² によるケルビン力への応答度） */
   readonly magneticSusceptibility: number;
-  /** 結合エネルギー（相転移閾値） */
+  /** 結合エネルギー（融点・沸点などの相転移閾値） */
   readonly bindingEnergy: number;
+  /** 液体相における固体比密度倍率（デフォルト 0.9、氷→水は 1.09 等） */
+  readonly liquidDensityRatio?: number;
   /** 静止摩擦係数 μ_s */
   readonly staticFriction: number;
   /** 動摩擦係数 μ_d */
@@ -90,6 +94,8 @@ export interface SpaceEntity {
   magneticMoment: Vec3;
   /** 内部熱エネルギー */
   internalHeat: number;
+  /** 現在の相状態（固体 / 液体 / 気体） */
+  phaseState?: PhaseState;
   /** アース接続・巨大導体フラグ */
   isGrounded: boolean;
   /** ユーザー操作中フラグ */

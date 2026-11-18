@@ -168,6 +168,22 @@ export const DEFAULT_MATERIALS: readonly MaterialSpec[] = [
     restitution: 0.1,
     colorHex: 0x475569,
   },
+  {
+    id: 'ice',
+    name: '氷 (Ice/Water)',
+    density: 0.92,
+    liquidDensityRatio: 1.09,
+    electronAffinity: -0.2,
+    conductivity: 0.05,
+    polarizability: 0.75,
+    spinMagnitude: 0.0,
+    magneticSusceptibility: 0.0,
+    bindingEnergy: 2.0,
+    staticFriction: 0.1,
+    dynamicFriction: 0.05,
+    restitution: 0.1,
+    colorHex: 0x7dd3fc,
+  },
 ];
 
 export function createMaterialMap(): Map<string, MaterialSpec> {

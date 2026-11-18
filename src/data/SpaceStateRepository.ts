@@ -154,6 +154,7 @@ export class SpaceStateRepository {
         this.createEntity('lab_earth_plate', 'steel_ground', [1.1, 0.25, -0.3], 0.25, 10.0, 0),
         this.createEntity('lab_magnet', 'neodymium_magnet', [-0.5, 0.22, 0.55], 0.22, 1.2, 0),
         this.createEntity('lab_iron', 'iron_ball', [0.2, 0.16, 0.55], 0.16, 0.5, 0),
+        this.createEntity('lab_ice', 'ice', [0.8, 0.18, 0.55], 0.18, 0.4, 0),
       ];
     }
   }

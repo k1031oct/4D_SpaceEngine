@@ -72,6 +72,7 @@ SpaceEntity
   ├─ dipoleMoment: [number, number, number]   (誘起電気双極子 p)
   ├─ magneticMoment: [number, number, number] (磁気双極子 m)
   ├─ internalHeat: number       (内部熱エネルギー)
+  ├─ phaseState: "solid" | "liquid" | "gas" (相状態：internalHeat と bindingEnergy の比から遷移)
   ├─ isGrounded: boolean        (アース接続・巨大導体フラグ)
   ├─ isGrabbed: boolean         (ユーザー操作中フラグ)
   ├─ isSleeping: boolean        (静止摩擦ロック状態フラグ)
@@ -123,6 +124,7 @@ SandboxUiState
 | **4. 空間場更新** | `FieldSolver` | └─ CFL 条件からサブステップ回数 $N_{\text{sub}}$ と $\Delta t_{\text{sub}}$ を決定<br>└─ `isSleeping == false` のパケットに対し：<br>　├─ ポアソン圧力緩和（T字境界では面対称フラックスを適用）<br>　├─ 運動量フロー $\vec{P}$ と渦度 $\vec{\omega}$ の相互更新<br>　└─ 空間粘性による散逸（運動量の一部を $U_{\text{vib}}$ へ変換）<br>└─ $|\Delta \Phi| < \varepsilon$ かつ $|\vec{P}| < \varepsilon$ のパケットをスリープ化 |
 | **5. 場からの力取得** | `FieldSolver` | └─ 各 `Visible` エンティティ位置で $\nabla \Phi$（静電・重力）、$\nabla |\vec{\omega}|^2$（ケルビン磁力）、分極力をサンプリングし速度へ積分 |
 | **6. サブグリッド接触** | `ContactSolver` | └─ エンティティ同士・床面とのめり込み解消（Position-Based）<br>└─ 接触ペアに対し：<br>　├─ 摩擦帯電（相対滑り速度 $\times \Delta\text{electronAffinity}$ で電荷移動）<br>　├─ 導体分配・アース接地（`conductivity` に応じ $\Phi$ 均等化 / `isGrounded` で $q \to 0$）<br>　└─ **静止摩擦ロック**：$|v_{\text{rel}}| < v_{\text{sleep}}$ かつ接線力 $< \mu_s N$ なら速度を `0` に固定し `isSleeping = true` |
+| **6.5 相転移・熱緩和** | `PhaseTransitionSolver` | └─ `internalHeat` と `bindingEnergy` を比較し `solid` / `liquid` / `gas` を決定<br>└─ 相状態に応じて実効密度（気化時は極小密度 $\to$ 浮力で自動上昇）と流動性を更新し、環境温度 `ambientHeat` へ緩やかに放熱 |
 | **7. 状態通知** | `SpaceStateRepository`<br>`SandboxViewModel` | └─ Repository の状態コミット<br>└─ 新しい `SandboxUiState` を生成し、View へ通知 |
 
 ### 3.2 ユーザー操作フロー（掴む・動かす・こする）

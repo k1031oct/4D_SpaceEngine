@@ -1,5 +1,5 @@
 import type { SimilarityInsight } from '../core/SimilarityAnalyzer';
-import type { DebugOverlayMode, MediumId, PresetId, Vec3 } from '../core/types';
+import type { DebugOverlayMode, MediumId, PhaseState, PresetId, Vec3 } from '../core/types';
 
 /**
  * 描画層へ渡す軽量エンティティスナップショット
@@ -11,6 +11,7 @@ export interface EntityRenderSnapshot {
   readonly radius: number;
   readonly colorHex: number;
   readonly netCharge: number;
+  readonly phaseState: PhaseState;
   readonly isSleeping: boolean;
   readonly isGrabbed: boolean;
 }
@@ -41,6 +42,7 @@ export interface SandboxUiState {
     readonly charge: number;
     readonly velocityMag: number;
     readonly heat: number;
+    readonly phaseState: PhaseState;
     readonly isSleeping: boolean;
   } | null;
   readonly debugOverlayMode: DebugOverlayMode;

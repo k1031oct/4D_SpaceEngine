@@ -233,6 +233,20 @@ export class ThreeViewAdapter {
       mesh.position.set(snap.position[0], snap.position[1], snap.position[2]);
 
       const mat = mesh.material as THREE.MeshStandardMaterial;
+      if (snap.phaseState === 'gas') {
+        mesh.scale.set(1.5, 1.5, 1.5);
+        mat.transparent = true;
+        mat.opacity = 0.35;
+      } else if (snap.phaseState === 'liquid') {
+        mesh.scale.set(1.2, 0.75, 1.2);
+        mat.transparent = true;
+        mat.opacity = 0.78;
+      } else {
+        mesh.scale.set(1, 1, 1);
+        mat.transparent = false;
+        mat.opacity = 1.0;
+      }
+
       if (snap.netCharge > 0.1) {
         mat.emissive.setHex(0xef4444);
         mat.emissiveIntensity = Math.min(0.8, Math.abs(snap.netCharge) * 0.25);

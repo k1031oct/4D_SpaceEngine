@@ -1,3 +1,4 @@
+import { PhaseTransitionSolver } from './PhaseTransitionSolver';
 import { SpacePacketGrid } from './SpacePacketGrid';
 import type {
   AmbientMediumSpec,
@@ -330,7 +331,7 @@ export class FieldSolver {
 
       // 空間媒質によるアルキメデスの浮力と空間フロー P との相対速度に基づく流体抗力
       if (medium && (medium.density > 0 || medium.viscosity > 0)) {
-        const objDensity = Math.max(mat?.density ?? 1.0, 1e-3);
+        const objDensity = Math.max(PhaseTransitionSolver.getEffectiveDensity(ent, mat), 1e-4);
         const buoyRatio = medium.density / objDensity;
         ax -= backgroundField[0] * buoyRatio;
         ay -= backgroundField[1] * buoyRatio;
