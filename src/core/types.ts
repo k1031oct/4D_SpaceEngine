@@ -204,6 +204,8 @@ export interface SpaceCoreConfig {
   readonly magneticCoupling: number;
   /** ローレンツ力 q(v×ω) の結合定数 */
   readonly lorentzCoupling: number;
+  /** 万有引力統一結合定数 G（質量＝素粒子密度の積分から重力を創発） */
+  readonly gravitationalConstant: number;
   /** 摩擦帯電係数 */
   readonly triboRate: number;
   /** ε-Cutoff 最小エネルギー閾値 */

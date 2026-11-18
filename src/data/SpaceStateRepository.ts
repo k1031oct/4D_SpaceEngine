@@ -31,6 +31,7 @@ export function createDefaultCoreConfig(): SpaceCoreConfig {
     polarizationCoupling: 2.8,
     magneticCoupling: 6.5,
     lorentzCoupling: 0.6,
+    gravitationalConstant: 0.0245,
     triboRate: 1.5,
     epsilonCutoff: 1e-4,
     sleepVelocityThreshold: 0.06,
@@ -128,7 +129,6 @@ export class SpaceStateRepository {
       const planet: SpaceEntity = {
         ...this.createEntity('planet_earth', 'steel_ground', [0, -50.0, 0], 18.0, 1e6, 0),
         isGrounded: false,
-        gravityStrength: 9.8 * 50.0 * 50.0, // 机上 (y≈0) で g = 9.8 m/s² になる巨大重力源
       };
       const moon: SpaceEntity = {
         ...this.createEntity('moon_sat', 'iron_ball', [65.0, -50.0, 0], 5.0, 1e4, 0),
@@ -146,7 +146,6 @@ export class SpaceStateRepository {
       const earth: SpaceEntity = {
         ...this.createEntity('earth_projected', 'steel_ground', [0, -50.0, 0], 18.0, 1e6, 0),
         isGrounded: false,
-        gravityStrength: 9.8 * 50.0 * 50.0,
       };
       this.entities = [
         earth,

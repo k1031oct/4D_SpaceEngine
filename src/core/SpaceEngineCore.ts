@@ -78,6 +78,7 @@ export class SpaceEngineCore {
         activeEntities,
         this.config.nx,
         this.config.cellSize,
+        this.config.gravitationalConstant,
       );
       this.absorbedBackgroundEnergy += scaleRes.absorbedEnergyDelta;
 

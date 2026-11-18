@@ -101,7 +101,9 @@ export class FieldSolver {
       if (ent.domainClass !== 'Visible') continue;
       const mat = materials.get(ent.materialId);
       const bondRatio = PhaseTransitionSolver.getEffectiveBondRatio(ent, mat);
+      const effDensity = PhaseTransitionSolver.getEffectiveDensity(ent, mat);
       const elasticity = 1.0 + ((mat?.elasticity ?? 1.0) - 1.0) * bondRatio;
+      const densityStiffnessBoost = Math.log1p(effDensity) * 0.15;
 
       const hasCharge = Math.abs(ent.netCharge) > 1e-7;
       const hasMag =
@@ -127,9 +129,9 @@ export class FieldSolver {
             const w = wx * wy * wz;
             const idx = grid.index(x0 + dx, y0 + dy, z0 + dz);
 
-            // 空間パケットの弾性・硬さ stiffness へマテリアルの弾性率を反映
-            if (elasticity !== 1.0) {
-              grid.stiffness[idx] += (elasticity - 1.0) * w;
+            // 空間パケットの弾性・硬さ・屈折率 stiffness へマテリアルの弾性率と素粒子密度を反映
+            if (elasticity !== 1.0 || densityStiffnessBoost > 0) {
+              grid.stiffness[idx] += (elasticity - 1.0 + densityStiffnessBoost) * w;
             }
 
             if (hasCharge) {
@@ -399,8 +401,12 @@ export class FieldSolver {
         az += (ent.velocity[0] * wy - ent.velocity[1] * wx) * lorentzFactor;
       }
 
-      // 2. 誘電分極による静電誘導引力 F_pol = α_pol * k_pol * ∇|∇Φ|²
-      const pol = mat?.polarizability ?? 0;
+      // 2. 誘電分極による静電誘導引力 F_pol = α_eff * k_pol * ∇|∇Φ|²
+      // 素粒子密度の低下（気化等）に応じて単位体積あたりの分極応答もスケーリングする
+      const basePol = mat?.polarizability ?? 0;
+      const effDensity = PhaseTransitionSolver.getEffectiveDensity(ent, mat);
+      const densityRatio = effDensity / Math.max(mat?.density ?? 1.0, 1e-4);
+      const pol = basePol * Math.min(1.0, Math.sqrt(Math.max(0, densityRatio)));
       if (pol > 0.01) {
         const gradPhiCenter = this.sampleSymmetricGradPhi(grid, ent.position);
         ent.dipoleMoment = [
@@ -477,16 +483,18 @@ export class FieldSolver {
         az += gradW2[2] * magFactor;
       }
 
-      // 4. 計算窓内の Visible 天体（gravityStrength > 0）による空間密度勾配重力
+      // 4. 計算窓内の全 Visible オブジェクトによる統一万有引力（質量＝素粒子密度の積分）
       for (const other of entities) {
-        if (other === ent || other.domainClass !== 'Visible' || !other.gravityStrength) continue;
+        if (other === ent || other.domainClass !== 'Visible') continue;
+        const gravStrength = other.gravityStrength ?? other.mass * config.gravitationalConstant;
+        if (gravStrength <= 1e-4) continue;
         const dx = other.position[0] - ent.position[0];
         const dy = other.position[1] - ent.position[1];
         const dz = other.position[2] - ent.position[2];
         const minR = Math.max(other.radius + ent.radius, grid.cellSize * 0.5);
         const r2 = Math.max(dx * dx + dy * dy + dz * dz, minR * minR);
         const r = Math.sqrt(r2);
-        const gAcc = other.gravityStrength / r2;
+        const gAcc = gravStrength / r2;
         ax += (dx / r) * gAcc;
         ay += (dy / r) * gAcc;
         az += (dz / r) * gAcc;

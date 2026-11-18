@@ -27,6 +27,7 @@ export class PerceptualScaler {
     entities: SpaceEntity[],
     gridCellsPerAxis: number,
     baseCellSize: number,
+    gravitationalConstant = 0.0245,
   ): PerceptualClassificationResult {
     // 1. 基準パケットサイズ L_base の決定
     let cellSize = baseCellSize;
@@ -95,10 +96,11 @@ export class PerceptualScaler {
       if (isOutsideWindow || isTooHugeForWindow) {
         ent.domainClass = 'Projected';
 
-        // 巨大天体（地球など）が計算窓の外にある場合、境界シェルへ重力・電場勾配を射影
-        if (ent.gravityStrength && ent.gravityStrength !== 0 && distFromCenter > 1e-4) {
+        // 巨大天体（地球など）が計算窓の外にある場合、質量(素粒子密度の積分)または指定重力強度から境界シェルへ重力を射影
+        const gravStrength = ent.gravityStrength ?? ent.mass * gravitationalConstant;
+        if (gravStrength > 0.01 && distFromCenter > 1e-4) {
           // 計算窓中心から天体方向 (dx, dy, dz) への重力加速度ベクトル g = G*M / r^3 * (ent - windowCenter)
-          const invR3 = ent.gravityStrength / (distFromCenter * distFromCenter * distFromCenter);
+          const invR3 = gravStrength / (distFromCenter * distFromCenter * distFromCenter);
           autoProjectedSources.push({
             id: `proj_grav_${ent.id}`,
             uniformField: [dx * invR3, dy * invR3, dz * invR3],

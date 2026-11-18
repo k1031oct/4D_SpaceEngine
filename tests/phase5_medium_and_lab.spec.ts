@@ -478,4 +478,54 @@ describe('空間媒質（真空・気体・水）および統合実験場（全�
     expect(res.entities.length).toBe(2);
     expect(res.entities[0].id).toContain('ice_block_frag_');
   });
+
+  it('素粒子密度→万有引力統一テスト: gravityStrength未指定でも質量(密度×体積)に応じて中性の周囲物体を引き寄せること', () => {
+    const repo = new SpaceStateRepository(createDefaultCoreConfig());
+    repo.externalSources = [];
+    repo.entities = [
+      {
+        id: 'dense_body',
+        materialId: 'iron_ball',
+        position: [-0.6, 1.5, 0],
+        velocity: [0, 0, 0],
+        angularVelocity: [0, 0, 0],
+        radius: 0.25,
+        mass: 500.0, // 高質量（gravityStrength未指定）
+        netCharge: 0,
+        dipoleMoment: [0, 0, 0],
+        magneticMoment: [0, 0, 0],
+        internalHeat: 0,
+        isGrounded: false,
+        isGrabbed: false,
+        isSleeping: false,
+        domainClass: 'Visible',
+      },
+      {
+        id: 'probe',
+        materialId: 'paper',
+        position: [0.6, 1.5, 0],
+        velocity: [0, 0, 0],
+        angularVelocity: [0, 0, 0],
+        radius: 0.12,
+        mass: 0.1,
+        netCharge: 0,
+        dipoleMoment: [0, 0, 0],
+        magneticMoment: [0, 0, 0],
+        internalHeat: 0,
+        isGrounded: false,
+        isGrabbed: false,
+        isSleeping: false,
+        domainClass: 'Visible',
+      },
+    ];
+    const core = new SpaceEngineCore(repo.config);
+    const initX = repo.entities[1].position[0];
+
+    for (let i = 0; i < 30; i++) {
+      core.step(repo.entities, repo.materials, repo.externalSources, 1 / 60);
+    }
+
+    // 中性・非磁性の紙片が、高質量体の統一万有引力 G*M により引き寄せられること
+    expect(repo.entities[1].position[0]).toBeLessThan(initX - 0.1);
+  });
 });
