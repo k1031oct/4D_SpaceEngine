@@ -70,11 +70,19 @@ MaterialSpec
   ├─ polarizability: number     (誘電分極率：外部 ∇Φ に対する誘導しやすさ)
   ├─ spinMagnitude: number      (残留磁気スピン強度：定常渦度 ω の生成源)
   ├─ magneticSusceptibility: number (磁気感受率：∇|ω|² によるケルビン力への応答度)
-  ├─ combustionEnergy?: number  (燃焼時の解放エネルギー)
+  ├─ bindingEnergy: number      (結合エネルギー：相転移閾値)
+  ├─ activationBarrier?: number (酸化還元・燃焼の活性化障壁)
+  ├─ oxidizedWellDepth?: number (酸化後の安定結合井戸の深さ)
   ├─ elasticity: number         (弾性率：結合の硬さ・空間 stiffness 寄与)
   ├─ plasticity: number         (塑性・粘弾性散逸率：変形エネルギーの熱変換割合)
-  ├─ staticFriction: number     (静止摩擦係数 μ_s)
-  └─ dynamicFriction: number    (動摩擦係数 μ_d)
+  ├─ bondChargeDensity: number  (結合電荷密度)
+  ├─ equilibriumSpacing: number (平衡格子間隔 r_0：密度・バリア反発の源)
+  ├─ surfaceWavelength: number  (表面波紋波長 λ：定在波の檻共鳴用)
+  ├─ surfacePotentialDepth: number (表面ポテンシャル井戸深さ U_0)
+  ├─ resonantFrequency: number  (固有共鳴周波数 ω_0：ローレンツ複素屈折率光学用)
+  ├─ coerciveBarrier: number    (保磁力障壁：ヒステリシス閾値)
+  ├─ topology: "solid" | "hollow" | "porous" | "fluid"
+  └─ shellThicknessRatio: number (中空・外殻厚み比)
 
 SpaceEntity
   ├─ id: string
@@ -96,6 +104,8 @@ SpaceEntity
   ├─ isBurning?: boolean        (酸化還元による燃焼中フラグ)
   ├─ fuelRemaining?: number     (可燃残量 0..1)
   ├─ isVaporParticle?: boolean  (気化分散によって生成されたサブ粒子フラグ)
+  ├─ enclosedMediumId?: string  (中空容器の封入気体媒質ID)
+  ├─ enclosedMediumDensity?: number (封入気体実効密度：破裂時に空間へ解放)
   ├─ isGrounded: boolean        (アース接続・巨大導体フラグ)
   ├─ isGrabbed: boolean         (ユーザー操作中フラグ)
   ├─ isSleeping: boolean        (静止摩擦ロック状態フラグ)
@@ -145,10 +155,10 @@ SandboxUiState
 | **1. スケール決定** | `PerceptualScaler` | └─ カメラ位置・速度・近接最大オブジェクトから基準サイズ $L_{\text{base}}$ を算出<br>└─ 全 `SpaceEntity` を `Visible` / `Projected` / `Absorbed` に分類 |
 | **2. 境界・双対同期** | `BoundaryProjector`<br>`DualPacketizer` | └─ `Projected`（地球・太陽・遠方電源等）を境界シェル6面の $\vec{G}_{\text{boundary}}, \vec{B}_{\text{boundary}}$ へ射影<br>└─ 必要に応じ Octree を分割/統合し、内部の `Visible` オブジェクトを Pack/Unpack |
 | **3. ソース注入** | `FieldSolver` | └─ `Visible` エンティティの $q, \vec{m}, U$ を包含パケットのソース項 $S_{\Phi}, S_{\omega}$ へ加算 |
-| **4. 空間場更新（2大チャネル）** | `FieldSolver`<br>`MediumFluxSolver` | └─ **真空チャネル（`FieldSolver`）**：CFL・拡散安定制御下での非線形屈折率 $\varepsilon_{\text{eff}}$ ポアソン緩和、光共鳴吸収、強磁性/強誘電ヒステリシス更新、事象の地平面自己捕獲判定<br>└─ **媒質チャネル（`MediumFluxSolver`）**：$C_{\text{med}} > 0$ のパケット間で浮力駆動対流・熱伝導・圧力衝撃波・ガス拡散を実行（$C_{\text{med}} = 0$ は自動断熱） |
-| **5. 場からの力取得** | `FieldSolver` | └─ 各 `Visible` エンティティ位置で $\nabla \Phi$、$q(\vec{v} \times \vec{\omega})$、$\nabla(\vec{m}\cdot\vec{\omega})$、$\nabla|\nabla\Phi|^2$、表面張力・統計モーメント力を積分 |
-| **6. 不可侵バリア・定在波接触** | `ContactSolver` | └─ 不可侵電子雲バリア反発と定在波の檻 $E_{\text{trap\_max}}$ によるエネルギー奪取・決壊（摩擦熱・帯電・冷間圧接）<br>└─ 連結グループ（電池＋極/セパレータ/－極）と導線パケットの電圧落差電流・ジュール発熱を実行 |
-| **6.5 秩序度 Ψ・相転移** | `PhaseTransitionSolver` | └─ 連続秩序度 $\Psi \in [0, 1]$ を更新し、気化分散（$\Psi \to 0$）および臨界破壊を処理 |
+| **4. 空間場更新（2大チャネル）** | `ISpatialComputeBackend`<br>(`FieldSolver` / `MediumFluxSolver`) | └─ **真空チャネル（`FieldSolver`）**：非線形屈折率 $\varepsilon_{\text{eff}}$ による連続的波速低下（$c_{\text{eff}} \to 0$ で事象の地平面自己捕獲）、ローレンツ振動子モデル $\tilde{n}(\omega)$ による連続光学応答、ヒステリシス更新<br>└─ **媒質チャネル（`MediumFluxSolver`）**：実効密度差 $\rho_{\text{eff}} - \bar{\rho}_{\text{eff}}$ によるアルキメデス対流、酸素 `reactivityPotential` 拡散、3軸アップウィンド移流（$C_{\text{med}} = 0$ は自動断熱） |
+| **5. 場からの力取得 & 熱交換** | `FieldSolver`<br>`SpaceEngineCore` | └─ 各 `Visible` エンティティ位置で $\nabla \Phi$、$q(\vec{v} \times \vec{\omega})$、$\nabla(\vec{m}\cdot\vec{\omega})$、$\nabla|\nabla\Phi|^2$ を積分<br>└─ 物体と周囲空間パケット `vibrationEnergy` 間で双方向熱交換フラックスを実行（摩擦熱・ジュール熱 $\to$ 周囲空気加熱 $\to$ 上昇対流） |
+| **6. 不可侵バリア・定在波接触** | `ContactSolver` | └─ 電子雲重なり指数関数的空間気圧スパイク反発（PBDワープ最小化）<br>└─ 定在波の檻 $E_{\text{trap\_max}}$ によるエネルギー捕獲・決壊時の**運動エネルギー厳密差し引き**（床面も同一ロジックへ統一）<br>└─ 連結グループ（電池）の電子親和力差 $\Delta \chi$ に基づく電圧創発・電流・ジュール発熱 |
+| **6.5 秩序度 Ψ・相転移** | `PhaseTransitionSolver` | └─ 連続秩序度 $\Psi \in [0, 1]$ を更新し、汎用結晶の形状記憶復元、合計 `1.0` 保存の3分岐曲げ収支、局所酸素比例燃焼、封入媒質放出破裂を実行 |
 | **7. 状態通知** | `SpaceStateRepository`<br>`SandboxViewModel` | └─ Repository の状態コミット<br>└─ 新しい `SandboxUiState` を生成し、View へ通知 |
 
 ### 3.2 ユーザー操作フロー（掴む・動かす・こする）

@@ -5,6 +5,7 @@ import type { SpacePacketGrid } from './SpacePacketGrid';
 import type {
   AmbientMediumSpec,
   CoreStepMetrics,
+  InjectorBrushMode,
   MaterialSpec,
   SpaceCoreConfig,
   SpaceEntity,
@@ -27,6 +28,7 @@ export class CpuTypedArrayBackend implements ISpatialComputeBackend {
     rawDt: number,
     config: SpaceCoreConfig,
     medium?: AmbientMediumSpec,
+    mediaCatalog?: ReadonlyMap<string, AmbientMediumSpec>,
   ): CoreStepMetrics {
     if (medium) {
       this.mediumSolver.syncMediumBaseline(grid, medium);
@@ -40,14 +42,66 @@ export class CpuTypedArrayBackend implements ISpatialComputeBackend {
       rawDt,
       config,
       medium,
+      mediaCatalog,
     );
 
-    const effectiveFrameDt = Math.min(Math.max(rawDt, 1e-5), 0.05);
+    const maxFrameDt = config.maxFrameDt ?? 0.05;
+    const effectiveFrameDt = Math.min(Math.max(rawDt, 1e-5), maxFrameDt);
     if (medium) {
-      this.mediumSolver.solve(grid, backgroundField, effectiveFrameDt);
+      this.mediumSolver.solve(grid, backgroundField, effectiveFrameDt, config.maxMediumSubDt ?? 0.02);
     }
 
     return metrics;
+  }
+
+  public injectBrush(
+    grid: SpacePacketGrid,
+    worldPos: Vec3,
+    radius: number,
+    mode: InjectorBrushMode,
+    strength = 1.0,
+    mediaCatalog?: ReadonlyMap<string, AmbientMediumSpec>,
+  ): void {
+    this.mediumSolver.injectBrush(grid, worldPos, radius, mode, strength, mediaCatalog);
+  }
+
+  public syncMediumBaseline(grid: SpacePacketGrid, medium: AmbientMediumSpec): void {
+    this.mediumSolver.syncMediumBaseline(grid, medium);
+  }
+
+  public evaluateLightInteraction(
+    material: MaterialSpec | undefined,
+    lightFrequency: number,
+  ): { transmittance: number; reflectance: number; absorption: number } {
+    return this.fieldSolver.evaluateLightInteraction(material, lightFrequency);
+  }
+
+  public evaluateHollowTransmissionAndPermeation(
+    shellZ: number,
+    innerZ: number,
+    gapSpacing: number,
+    particleHardRadius: number,
+  ): { waveTransmittance: number; canPermeate: boolean } {
+    return this.fieldSolver.evaluateHollowTransmissionAndPermeation(
+      shellZ,
+      innerZ,
+      gapSpacing,
+      particleHardRadius,
+    );
+  }
+
+  public evaluateQuantumTunneling(
+    barrierHeight: number,
+    particleEnergy: number,
+    barrierWidth: number,
+    scaleL: number,
+  ): number {
+    return this.fieldSolver.evaluateQuantumTunneling(
+      barrierHeight,
+      particleEnergy,
+      barrierWidth,
+      scaleL,
+    );
   }
 
   public reset(): void {

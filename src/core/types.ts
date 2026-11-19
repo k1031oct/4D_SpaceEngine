@@ -91,10 +91,10 @@ export interface MaterialSpec {
   readonly bindingEnergy: number;
   /** 液体相における固体比密度倍率（デフォルト 0.9、氷→水は 1.09 等） */
   readonly liquidDensityRatio?: number;
-  /** 発火点（酸化還元・電子移動の活性化エネルギー閾値） */
-  readonly ignitionHeat?: number;
-  /** 燃焼時の単位時間あたり発熱・解放エネルギー */
-  readonly combustionEnergy?: number;
+  /** 酸化還元（燃焼）の活性化障壁 */
+  readonly activationBarrier?: number;
+  /** 酸化後の安定結合井戸の深さ（燃焼解放エネルギー源） */
+  readonly oxidizedWellDepth?: number;
   /** 弾性率（ヤング率相当：硬さ・空間 stiffness 寄与） */
   readonly elasticity?: number;
   /** 塑性・粘弾性散逸率（0=完全弾性、1=変形エネルギーをすべて熱へ散逸） */
@@ -119,12 +119,6 @@ export interface MaterialSpec {
   readonly topology?: MaterialTopology;
   /** 中空・外殻厚み比 */
   readonly shellThicknessRatio?: number;
-  /** 静止摩擦係数 μ_s */
-  readonly staticFriction: number;
-  /** 動摩擦係数 μ_d */
-  readonly dynamicFriction: number;
-  /** 反発係数（跳ね返り抑制のため低めに設定可能） */
-  readonly restitution: number;
   /** 描画用ベースカラー (16進数) */
   readonly colorHex: number;
 }
@@ -202,6 +196,10 @@ export interface SpaceEntity {
   fuelRemaining?: number;
   /** 気化分散により生成されたサブ粒子フラグ */
   isVaporParticle?: boolean;
+  /** 中空容器の封入気体媒質ID */
+  enclosedMediumId?: MediumId;
+  /** 中空容器の封入気体実効密度（破裂時に空間へ放出） */
+  enclosedMediumDensity?: number;
   /** アース接続・巨大導体フラグ */
   isGrounded: boolean;
   /** ユーザー操作中フラグ */
@@ -294,6 +292,10 @@ export interface SpaceCoreConfig {
   readonly sleepVelocityThreshold: number;
   /** 床面（机）の Y 座標 */
   readonly floorY: number;
+  /** 1フレームの最大時間刻み上限 (デフォルト 0.05s) */
+  readonly maxFrameDt?: number;
+  /** 媒質チャネルの最大サブステップ刻み (デフォルト 0.02s) */
+  readonly maxMediumSubDt?: number;
 }
 
 /**

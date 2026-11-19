@@ -60,3 +60,14 @@
   * [x] Task 3: 極小スケール量子トンネル波動染み出し・強誘電/強磁性ヒステリシス統合
   * [x] Task 4: Lazy Micro-Unpack（金属疲労破断・形状記憶合金復元）および自己組織化結晶ロック実装
   * [x] Task 5: 金属疲労・形状記憶合金プリセット追加 & `tests/phase6_8_unified_physics.spec.ts`（11項目）全パス
+
+### Phase 9：非創発ハードコード一掃＆完全第一原理リファクタリング
+* **実装タスク：**
+  * [x] Step 0: `DATA_FLOW.md` / `DEVELOPMENT_PLAN.md` 同期更新
+  * [x] Task 1: `types.ts`, `ISpatialComputeBackend.ts` 純化（固定摩擦/反発削除、燃焼井戸化、ダウンキャスト廃止、時間刻み統合）
+  * [x] Task 2: `MaterialCatalog.ts` 完全第一原理化（欠落格子パラメータ補完、`computeEmergentDensity` 導入）
+  * [x] Task 3: `ContactSolver.ts` 刷新（摩擦熱運動エネルギー保存、床面定在波統一、指数気圧スパイク反発、$\Delta \chi$ 電池電圧創発）
+  * [x] Task 4: `FieldSolver.ts` 刷新（中空密度一元化、連続波速低下 $c_{\text{eff}} \to 0$ 事象地平面、ローレンツ振動子複素屈折率光学）
+  * [x] Task 5: `MediumFluxSolver.ts` 刷新（密度差浮力、酸素拡散、3軸アップウィンド移流、加重混合注入）
+  * [x] Task 6: `PhaseTransitionSolver.ts` / `DualPacketizer.ts` / `SpaceEngineCore.ts` 統合（名指し分岐削除、ヒステリシス帯、双方向熱交換完結）
+  * [x] 検証: `tests/phase9_pure_emergence.spec.ts`（8項目）＋ 既存全39テスト ＋ ビルド全パス

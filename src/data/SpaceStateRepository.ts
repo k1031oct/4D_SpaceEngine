@@ -36,6 +36,8 @@ export function createDefaultCoreConfig(): SpaceCoreConfig {
     epsilonCutoff: 1e-4,
     sleepVelocityThreshold: 0.06,
     floorY: 0.0,
+    maxFrameDt: 0.05,
+    maxMediumSubDt: 0.02,
   };
 }
 
@@ -178,6 +180,8 @@ export class SpaceStateRepository {
         {
           ...this.createEntity('he_balloon', 'rubber_balloon', [0, 0.4, 0], 0.24, 0.00004, 0, 'balloon', [0.42, 0.48, 0.42]),
           elasticEnergy: 0,
+          enclosedMediumId: 'helium',
+          enclosedMediumDensity: this.media.get('helium')?.density ?? 0.00018,
         },
       ];
     } else if (presetId === 'thermal_convection') {

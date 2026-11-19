@@ -26,6 +26,7 @@ export class FieldSolver {
     rawDt: number,
     config: SpaceCoreConfig,
     medium?: AmbientMediumSpec,
+    _mediaCatalog?: ReadonlyMap<string, AmbientMediumSpec>,
   ): CoreStepMetrics {
     // 1. スケール不変な無次元化係数（基準 L_ref = 0.25m に対する比率）
     const scaleRatio = Math.max(grid.cellSize / 0.25, 1e-6);
@@ -37,7 +38,7 @@ export class FieldSolver {
     const maxDiffDt =
       (grid.cellSize * grid.cellSize) / (8.0 * Math.max(scaledDiffusion, 1e-4));
     const maxSafeDt = Math.min(maxWaveDt, maxDiffDt);
-    const clampedRawDt = Math.min(Math.max(rawDt, 1e-5), 0.05);
+    const clampedRawDt = Math.min(Math.max(rawDt, 1e-5), config.maxFrameDt ?? 0.05);
     const substeps = Math.max(1, Math.min(32, Math.ceil(clampedRawDt / maxSafeDt)));
     const dtSub = clampedRawDt / substeps;
 
@@ -89,35 +90,55 @@ export class FieldSolver {
   }
 
   /**
-   * 光波とマテリアルの相互作用（透過・鏡面反射・共鳴吸収発熱）を固有共鳴周波数 ω_0 と自由電荷密度から算出する
+   * 光波とマテリアルの相互作用（透過・鏡面反射・共鳴吸収発熱）を
+   * 連続的なローレンツ振動子＋ドルーデ自由電子モデル（複素屈折率 n + iκ）から算出する
    */
   public evaluateLightInteraction(
     material: MaterialSpec | undefined,
     lightFrequency: number,
   ): { transmittance: number; reflectance: number; absorption: number } {
     if (!material) return { transmittance: 1, reflectance: 0, absorption: 0 };
-    const w0 = material.resonantFrequency ?? 10.0;
-    const cond = material.conductivity;
+    const w = Math.max(lightFrequency, 1e-4);
+    const w0 = Math.max(material.resonantFrequency ?? 10.0, 0.1);
+    const cond = Math.max(0, Math.min(1, material.conductivity));
+    const pol = Math.max(0, material.polarizability ?? 0.2);
 
-    // 1. 固有共鳴周波数近傍: 共鳴吸収（内部振動エネルギー U_vib へ変換）
-    const detuning = Math.abs(lightFrequency - w0) / Math.max(w0, 1e-4);
-    if (detuning < 0.22) {
-      const abs = 0.85 * (1.0 - detuning / 0.22);
-      return { transmittance: (1 - abs) * 0.3, reflectance: (1 - abs) * 0.7, absorption: abs };
-    }
+    // 誘電背景と共鳴振動子強度・プラズマ振動数
+    const epsBg = Math.max(1.0, material.elasticity ?? 1.5);
+    const gammaL = Math.max(0.05 * w0, 0.05) + cond * 0.1 * w0;
+    const gammaD = Math.max(0.03, 0.2 * (1.0 - 0.85 * cond)) * w0;
+    const fOsc = 0.25 + 0.65 * pol;
+    const wp2 = Math.pow(cond, 3) * 16.0 * w0 * w0;
 
-    // 2. 自由電子密度が高い導体でプラズマ周波数以下: 鏡面反射
-    if (cond > 0.65 && lightFrequency < w0 * 1.2) {
-      return { transmittance: 0.02, reflectance: 0.92, absorption: 0.06 };
-    }
+    // ローレンツ振動子＋ドルーデ項による複素誘電率 ε = ε_r + i ε_i
+    const w2 = w * w;
+    const w02 = w0 * w0;
+    const denomL = (w02 - w2) * (w02 - w2) + (gammaL * w) * (gammaL * w);
+    const denomD = w2 + gammaD * gammaD;
 
-    // 3. 非共鳴の絶縁体（ガラス等）: インピーダンス連続性に応じた透過屈折
-    const nEff = Math.sqrt(Math.max(1.0, material.elasticity ?? 1.5));
-    const fresnelR = Math.pow((nEff - 1) / (nEff + 1), 2);
+    const epsR = epsBg + (fOsc * w02 * (w02 - w2)) / denomL - wp2 / denomD;
+    const epsI = (fOsc * w02 * (gammaL * w)) / denomL + (wp2 * gammaD) / (w * denomD);
+
+    // 複素屈折率 n + iκ
+    const epsMag = Math.sqrt(epsR * epsR + epsI * epsI);
+    const n = Math.sqrt(Math.max(0, 0.5 * (epsMag + epsR)));
+    const kappa = Math.sqrt(Math.max(0, 0.5 * (epsMag - epsR)));
+
+    // フレネル反射率 R = ((n-1)^2 + κ^2) / ((n+1)^2 + κ^2)
+    const denomF = (n + 1.0) * (n + 1.0) + kappa * kappa;
+    const reflectance = denomF > 1e-9 ? ((n - 1.0) * (n - 1.0) + kappa * kappa) / denomF : 0;
+
+    // 内部減衰（ランベルト・ベール則に基づく連続吸収 A と透過 T）
+    const opticalDepth = 1.6;
+    const attenuation = Math.exp(-2.0 * kappa * opticalDepth);
+    const nonReflected = Math.max(0, 1.0 - reflectance);
+    const transmittance = nonReflected * attenuation;
+    const absorption = nonReflected - transmittance;
+
     return {
-      transmittance: Math.max(0, 1.0 - fresnelR - 0.02),
-      reflectance: fresnelR,
-      absorption: 0.02,
+      transmittance: Math.max(0, Math.min(1, transmittance)),
+      reflectance: Math.max(0, Math.min(1, reflectance)),
+      absorption: Math.max(0, Math.min(1, absorption)),
     };
   }
 
@@ -295,7 +316,7 @@ export class FieldSolver {
           const phiC = grid.phi[idx];
           const baseStiff = Math.max(0.1, grid.stiffness[idx] * permittivity);
 
-          // 非線形屈折率 ε_eff と事象の地平面（ブラックホール自己捕獲）判定
+          // 非線形屈折率 ε_eff による実効波速の連続的減速 (c_eff = c_0 / sqrt(ε_eff) → 0)
           const cellEnergy =
             0.5 *
               (phiC * phiC +
@@ -303,31 +324,15 @@ export class FieldSolver {
                 grid.py[idx] * grid.py[idx] +
                 grid.pz[idx] * grid.pz[idx]) +
             grid.vibrationEnergy[idx];
-          const stiff = baseStiff + 0.35 * cellEnergy;
-          if (stiff >= 14.0 || cellEnergy >= 35.0) {
-            grid.isEventHorizon[idx] = 1;
+          const epsEff = baseStiff + 0.35 * cellEnergy;
+          // 高エネルギー極限では観測指標として事象の地平面フラグを付与（物理式自体は連続）
+          const isHorizon = epsEff >= 14.0 || cellEnergy >= 35.0;
+          grid.isEventHorizon[idx] = isHorizon ? 1 : 0;
+          if (isHorizon) {
             eventHorizonCount++;
-            // 事象の地平面内部：外向き拡散・脱出を遮断し、負の深い重力井戸を維持して周囲を捕獲
-            const neighborSum =
-              grid.phi[idxXm] +
-              grid.phi[idxXp] +
-              grid.phi[idxYm] +
-              grid.phi[idxYp] +
-              grid.phi[idxZm] +
-              grid.phi[idxZp];
-            grid.phiNext[idx] = phiC + (neighborSum * 0.05 + grid.sourcePhi[idx]) * dt;
-            grid.pxNext[idx] = grid.px[idx] * 0.5;
-            grid.pyNext[idx] = grid.py[idx] * 0.5;
-            grid.pzNext[idx] = grid.pz[idx] * 0.5;
-            grid.wxNext[idx] = grid.wx[idx];
-            grid.wyNext[idx] = grid.wy[idx];
-            grid.wzNext[idx] = grid.wz[idx];
-            grid.isSleeping[idx] = 0;
-            continue;
           }
-          grid.isEventHorizon[idx] = 0;
 
-          // ポアソン緩和（ラプラシアンによる歪みの均質化）
+          // ポアソン緩和（高エネルギー密度領域では実効拡散係数が連続的に 0 へ漸近し外向き脱出を抑制）
           const lapPhi =
             grid.phi[idxXm] +
             grid.phi[idxXp] +
@@ -336,9 +341,12 @@ export class FieldSolver {
             grid.phi[idxZm] +
             grid.phi[idxZp] -
             6.0 * phiC;
+          const slowdownFactor = epsEff * (1.0 + 0.25 * Math.max(0, epsEff - 10.0));
+          const effDiff = diffFactor / slowdownFactor;
+          const phiDecayEff = isHorizon ? 1.0 : phiDecay;
 
           const newPhi =
-            (phiC + (diffFactor / stiff) * lapPhi + grid.sourcePhi[idx] * dt) * phiDecay;
+            (phiC + effDiff * lapPhi + grid.sourcePhi[idx] * dt) * phiDecayEff;
           // 極小スケール (cellSize <= 1e-3) では障壁を越える量子トンネル染み出し成分を追加
           const tunnelLeak =
             grid.cellSize <= 1e-3
@@ -347,18 +355,20 @@ export class FieldSolver {
               : 0;
           grid.phiNext[idx] = newPhi + tunnelLeak;
 
-          // 気圧勾配 ∇Φ による運動量フロー駆動
+          // 気圧勾配 ∇Φ による運動量フロー駆動（高屈折率領域では捕獲減衰が連続増大）
           const gradPhiX = (grid.phi[idxXp] - grid.phi[idxXm]) * (0.5 * invDx);
           const gradPhiY = (grid.phi[idxYp] - grid.phi[idxYm]) * (0.5 * invDx);
           const gradPhiZ = (grid.phi[idxZp] - grid.phi[idxZm]) * (0.5 * invDx);
+          const waveSuppression = 1.0 / (1.0 + 0.15 * Math.max(0, epsEff - 10.0));
 
-          const rawPx = grid.px[idx] - gradPhiX * dt;
-          const rawPy = grid.py[idx] - gradPhiY * dt;
-          const rawPz = grid.pz[idx] - gradPhiZ * dt;
+          const rawPx = grid.px[idx] - gradPhiX * dt * waveSuppression;
+          const rawPy = grid.py[idx] - gradPhiY * dt * waveSuppression;
+          const rawPz = grid.pz[idx] - gradPhiZ * dt * waveSuppression;
 
-          const newPx = rawPx * momDecay;
-          const newPy = rawPy * momDecay;
-          const newPz = rawPz * momDecay;
+          const momDecayEff = momDecay * Math.exp(-Math.max(0, epsEff - 12.0) * 0.2);
+          const newPx = rawPx * momDecayEff;
+          const newPy = rawPy * momDecayEff;
+          const newPz = rawPz * momDecayEff;
 
           grid.pxNext[idx] = newPx;
           grid.pyNext[idx] = newPy;
@@ -468,15 +478,7 @@ export class FieldSolver {
 
       // 空間媒質によるアルキメデスの浮力と空間フロー P との相対速度に基づく流体抗力
       if (medium && (medium.density > 0 || medium.viscosity > 0)) {
-        let objDensity = Math.max(PhaseTransitionSolver.getEffectiveDensity(ent, mat), 1e-4);
-        // 中空構造（ヘリウム風船等）で実質量が軽い場合は体積比密度を優先し、ヘリウム浮力を創発
-        if (mat?.topology === 'hollow' && ent.phaseState !== 'gas') {
-          const vol = (4.0 / 3.0) * Math.PI * ent.radius * ent.radius * ent.radius;
-          const apparentDensity = ent.mass / Math.max(vol, 1e-5);
-          if (apparentDensity < objDensity) {
-            objDensity = Math.max(apparentDensity, 1e-4);
-          }
-        }
+        const objDensity = Math.max(PhaseTransitionSolver.getEffectiveDensity(ent, mat), 1e-4);
         const buoyRatio = medium.density / objDensity;
         ax -= backgroundField[0] * buoyRatio;
         ay -= backgroundField[1] * buoyRatio;
@@ -672,12 +674,13 @@ export class FieldSolver {
           (ax - backgroundField[0]) ** 2 + (az - backgroundField[2]) ** 2,
         );
         const upwardForceOvercomesGravity = ay > 0.5;
-        const muS = mat?.staticFriction ?? 0.5;
+        const potDepth = mat?.surfacePotentialDepth ?? 0.5;
         const normalAccel = Math.max(0, -backgroundField[1]);
         // 磁石同士/鉄球の吸着後に定常的な自己/接触勾配で再起床しないよう十分な余裕閾値を設ける
         const isMagnetic = magMomentSq > 1e-5 || chiMag > 0.01;
         const margin = isMagnetic ? 3.5 : 0.8;
-        const horizontalOvercomesFriction = netHorizontalAccel > muS * normalAccel + margin;
+        const effectiveHold = potDepth * (0.5 + normalAccel);
+        const horizontalOvercomesFriction = netHorizontalAccel > effectiveHold + margin;
 
         if (
           ent.position[1] - ent.radius > config.floorY + 0.03 ||

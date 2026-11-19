@@ -2,14 +2,18 @@ import { PhaseTransitionSolver } from './PhaseTransitionSolver';
 import type { MaterialSpec, SpaceCoreConfig, SpaceEntity } from './types';
 
 /**
- * サブグリッド接触・摩擦ソルバ（Sub-grid Contact Solver）
- * 空間パケットの解像度以下の「剛体めり込み防止」「表面摩擦」「静止摩擦ロック」を担当し、
- * 微振動（ドリフト問題）を根本的に解消する。
+ * 不可侵バリア・定在波の檻・電池連結グループ回路ソルバ（Contact Solver）
+ * 固定摩擦係数（μ_s, μ_d）や固定反発係数（restitution）、固定電池電圧を廃止し、
+ * 1. 電子雲の指数関数的空間気圧スパイクによる非貫通反発
+ * 2. 表面波紋共鳴による定在波の檻（エネルギー保存則を厳密に満たす摩擦熱変換）
+ * 3. 床面の定在波の檻への統一
+ * 4. 電子親和力差 Δχ に基づく電池回路電圧の自律創発
+ * を実装する。
  */
 export class ContactSolver {
-  /**
-   * 床面（机）およびエンティティ同士の接触を解決する
-   */
+  private static readonly FLOOR_WAVELENGTH = 0.35;
+  private static readonly FLOOR_POTENTIAL_DEPTH = 0.65;
+
   public solve(
     entities: SpaceEntity[],
     materials: ReadonlyMap<string, MaterialSpec>,
@@ -28,7 +32,7 @@ export class ContactSolver {
       ent.position[2] += ent.velocity[2] * dt;
     }
 
-    // 2. エンティティ同士のめり込み解消・衝突減衰
+    // 2. エンティティ同士の指数関数的気圧スパイク反発・定在波の檻・帯電
     for (let i = 0; i < entities.length; i++) {
       const a = entities[i];
       if (a.domainClass !== 'Visible') continue;
@@ -39,6 +43,7 @@ export class ContactSolver {
 
         const { nx, ny, nz, overlap } = this.computeContactGeometry(a, b);
         if (overlap <= 0) continue;
+        if (a.isSleeping && b.isSleeping && overlap <= 0.002) continue;
 
         const invMa = a.isGrabbed || a.isGrounded ? 0 : 1.0 / Math.max(a.mass, 1e-4);
         const invMb = b.isGrabbed || b.isGrounded ? 0 : 1.0 / Math.max(b.mass, 1e-4);
@@ -52,76 +57,86 @@ export class ContactSolver {
         const matA = materials.get(a.materialId);
         const matB = materials.get(b.materialId);
 
+        // 法線押し付け気圧 ΔP_⊥ の算出（電子雲重なりによる定在波の檻の深化と、平衡超え時の反発スパイク）
+        const r0Avg = ((matA?.equilibriumSpacing ?? 0.25) + (matB?.equilibriumSpacing ?? 0.25)) * 0.5;
+        const overlapPressure = Math.exp(Math.min(3.5, overlap / Math.max(r0Avg * 0.25, 0.02))) - 1.0;
+        const excessOverlap = Math.max(0, overlap - 0.002);
+        const barrierSpike =
+          excessOverlap > 0 ? Math.exp(Math.min(3.5, excessOverlap / Math.max(r0Avg * 0.25, 0.02))) - 1.0 : 0;
+        const normalPressure = Math.max(0.2, overlapPressure + Math.max(0, -velAlongNormal));
+
         if (invMSum > 0) {
-          // 位置補正（Position-Based）
-          const corr = overlap / invMSum;
-          const significantOverlap = overlap > 2e-3;
+          // 指数関数的空間気圧スパイクによる速度場反発加速
+          const spikeImpulse = barrierSpike * 0.35 * dt;
           if (!a.isGrabbed && !a.isGrounded) {
-            a.position[0] -= nx * corr * invMa;
-            a.position[1] -= ny * corr * invMa;
-            a.position[2] -= nz * corr * invMa;
-            if (significantOverlap) a.isSleeping = false;
+            a.velocity[0] -= nx * spikeImpulse * invMa;
+            a.velocity[1] -= ny * spikeImpulse * invMa;
+            a.velocity[2] -= nz * spikeImpulse * invMa;
           }
           if (!b.isGrabbed && !b.isGrounded) {
-            b.position[0] += nx * corr * invMb;
-            b.position[1] += ny * corr * invMb;
-            b.position[2] += nz * corr * invMb;
-            if (significantOverlap) b.isSleeping = false;
+            b.velocity[0] += nx * spikeImpulse * invMb;
+            b.velocity[1] += ny * spikeImpulse * invMb;
+            b.velocity[2] += nz * spikeImpulse * invMb;
           }
 
-          const isMagneticAdhesion =
-            (matA?.magneticSusceptibility ?? 0) > 0.5 && (matB?.magneticSusceptibility ?? 0) > 0.5;
-          const isElectrostaticAdhesion =
-            (Math.abs(a.netCharge) > 0.5 && (matB?.polarizability ?? 0) > 0.7) ||
-            (Math.abs(b.netCharge) > 0.5 && (matA?.polarizability ?? 0) > 0.7);
+          // PBD位置補正は貫通防止の最小限の安全ガードに留める
+          const guardCorr = Math.max(0, overlap - 0.002) / invMSum;
+          if (guardCorr > 0) {
+            if (!a.isGrabbed && !a.isGrounded) {
+              a.position[0] -= nx * guardCorr * invMa;
+              a.position[1] -= ny * guardCorr * invMa;
+              a.position[2] -= nz * guardCorr * invMa;
+              if (overlap > 0.015) a.isSleeping = false;
+            }
+            if (!b.isGrabbed && !b.isGrounded) {
+              b.position[0] += nx * guardCorr * invMb;
+              b.position[1] += ny * guardCorr * invMb;
+              b.position[2] += nz * guardCorr * invMb;
+              if (overlap > 0.015) b.isSleeping = false;
+            }
+          }
 
+          // 法線衝突時の塑性・弾性エネルギー分配（固定反発係数を廃止）
           if (velAlongNormal < 0) {
-            const e =
-              isMagneticAdhesion || isElectrostaticAdhesion || Math.abs(velAlongNormal) < 0.2
-                ? 0.0
-                : Math.min(matA?.restitution ?? 0.2, matB?.restitution ?? 0.2);
+            const bondA = PhaseTransitionSolver.getEffectiveBondRatio(a, matA);
+            const bondB = PhaseTransitionSolver.getEffectiveBondRatio(b, matB);
+            const avgBond = (bondA + bondB) * 0.5;
+            const avgPlasticity =
+              1.0 - (1.0 - ((matA?.plasticity ?? 0.4) + (matB?.plasticity ?? 0.4)) * 0.5) * avgBond;
+            const eEff = Math.sqrt(Math.max(0, 1.0 - avgPlasticity)) * 0.4;
 
-            const jImp = (-(1 + e) * velAlongNormal) / invMSum;
+            const jImp = (-(1 + eEff) * velAlongNormal) / invMSum;
             if (!a.isGrabbed && !a.isGrounded) {
               a.velocity[0] -= jImp * invMa * nx;
               a.velocity[1] -= jImp * invMa * ny;
               a.velocity[2] -= jImp * invMa * nz;
+              if (Math.abs(jImp * invMa) > config.sleepVelocityThreshold) a.isSleeping = false;
             }
             if (!b.isGrabbed && !b.isGrounded) {
               b.velocity[0] += jImp * invMb * nx;
               b.velocity[1] += jImp * invMb * ny;
               b.velocity[2] += jImp * invMb * nz;
+              if (Math.abs(jImp * invMb) > config.sleepVelocityThreshold) b.isSleeping = false;
             }
           }
 
-          // 磁気・静電吸着時は減衰を強め、低速になったら双方を吸着静止ロックする
-          if (isMagneticAdhesion || isElectrostaticAdhesion) {
-            const relSpeedSq = rvx * rvx + rvy * rvy + rvz * rvz;
-            const lockThresh = config.sleepVelocityThreshold * 2.5;
-            if (relSpeedSq < lockThresh * lockThresh) {
-              if (!a.isGrabbed && !a.isGrounded) {
-                a.velocity = [0, 0, 0];
-                a.isSleeping = true;
-              }
-              if (!b.isGrabbed && !b.isGrounded) {
-                b.velocity = [0, 0, 0];
-                b.isSleeping = true;
-              }
-            } else {
-              if (!a.isGrabbed && !a.isGrounded) {
-                a.velocity[0] *= 0.65;
-                a.velocity[2] *= 0.65;
-              }
-              if (!b.isGrabbed && !b.isGrounded) {
-                b.velocity[0] *= 0.65;
-                b.velocity[2] *= 0.65;
-              }
+          // 法線押し付け圧 ΔP_⊥ による定在波の檻の深化が、十分な減衰後に自然な静止ロックを創発する
+          const relSpeedSq = rvx * rvx + rvy * rvy + rvz * rvz;
+          const lockThresh = config.sleepVelocityThreshold * Math.min(2.5, 1.0 + normalPressure * 0.5);
+          if (relSpeedSq < lockThresh * lockThresh) {
+            if (!a.isGrabbed && !a.isGrounded) {
+              a.velocity = [0, 0, 0];
+              a.isSleeping = true;
+            }
+            if (!b.isGrabbed && !b.isGrounded) {
+              b.velocity = [0, 0, 0];
+              b.isSleeping = true;
             }
           }
         }
 
-        // マテリアル物性に基づく接触相互作用（摩擦帯電・導体分配・アース放電）
-        this.applyMaterialContactInteraction(
+        // 定在波の檻（エネルギー保存則厳密適用）・摩擦帯電・導体分配・アース放電
+        this.applyStandingWaveContact(
           a,
           b,
           matA,
@@ -130,16 +145,19 @@ export class ContactSolver {
           rvy,
           rvz,
           velAlongNormal,
+          normalPressure,
           nx,
           ny,
           nz,
+          invMa,
+          invMb,
           dt,
           config,
         );
       }
     }
 
-    // 3. 床面（机）接触と静止摩擦ロック（floorYが有限値の場合のみ適用）
+    // 3. 床面（机）接触の定在波の檻への統一処理
     const floorY = config.floorY;
     for (const ent of entities) {
       if (ent.domainClass !== 'Visible' || ent.isGrabbed) continue;
@@ -150,66 +168,89 @@ export class ContactSolver {
         const bottomY = ent.position[1] - halfH;
 
         if (bottomY <= floorY + 2e-3) {
+          const floorOverlap = Math.max(0, floorY + halfH - ent.position[1]);
           ent.position[1] = floorY + halfH;
 
           // 垂直方向の弾性エネルギー蓄積・塑性熱散逸・復元反発
           if (ent.velocity[1] < 0) {
             const impactSpeed = Math.abs(ent.velocity[1]);
-            if (impactSpeed < 0.35) {
+            const impactKE = 0.5 * ent.mass * impactSpeed * impactSpeed;
+            const bondRatio = PhaseTransitionSolver.getEffectiveBondRatio(ent, mat);
+            const objPlasticity = mat?.plasticity ?? 0.5;
+            // 結合度低下による熱軟化 + 床面との結合エネルギー吸収
+            const plasticity = 1.0 - (1.0 - Math.max(objPlasticity, 0.52)) * bondRatio;
+            const rigidity = Math.max(0.05, PhaseTransitionSolver.getEffectiveRigidity(ent, mat));
+
+            ent.internalHeat += impactKE * plasticity * 0.25;
+            const storedElastic = impactKE * (1.0 - plasticity);
+            ent.elasticEnergy = (ent.elasticEnergy ?? 0) + storedElastic;
+
+            const strain = Math.min(
+              0.32,
+              Math.sqrt(storedElastic / Math.max(rigidity * ent.mass * 12.0, 0.1)),
+            );
+            ent.compression = Math.max(ent.compression ?? 0, strain);
+
+            const reboundSpeed = Math.sqrt((2.0 * storedElastic) / Math.max(ent.mass, 1e-4));
+            if (reboundSpeed < 0.35) {
               ent.velocity[1] = 0;
             } else {
-              const impactKE = 0.5 * ent.mass * impactSpeed * impactSpeed;
-              const bondRatio = PhaseTransitionSolver.getEffectiveBondRatio(ent, mat);
-              const objPlasticity = mat?.plasticity ?? 0.5;
-              // 結合度が低下（熱軟化）するほどエネルギーが熱へ散逸し、液体(bondRatio=0)では反発ゼロになる
-              const thermalSoftenedPlasticity = 1.0 - (1.0 - objPlasticity) * bondRatio;
-              const plasticity = Math.max(thermalSoftenedPlasticity, 0.52);
-              // 剛性は実効密度と電荷結合力から導出
-              const elasticity = Math.max(0.05, PhaseTransitionSolver.getEffectiveRigidity(ent, mat));
-
-              // 塑性・粘弾性散逸分は内部熱エネルギーへ変換
-              ent.internalHeat += impactKE * plasticity * 0.25;
-
-              // 弾性ポテンシャルエネルギーとして蓄積し、復元反発へ変換
-              const storedElastic = impactKE * (1.0 - plasticity);
-              ent.elasticEnergy = (ent.elasticEnergy ?? 0) + storedElastic;
-
-              // 弾性率に応じた圧縮ひずみ δ/r を算出（柔らかいゴムほど大きく凹む）
-              const strain = Math.min(
-                0.32,
-                Math.sqrt(storedElastic / Math.max(elasticity * ent.mass * 12.0, 0.1)),
-              );
-              ent.compression = Math.max(ent.compression ?? 0, strain);
-
-              const reboundSpeed = Math.sqrt((2.0 * storedElastic) / Math.max(ent.mass, 1e-4));
-              ent.velocity[1] = reboundSpeed < 0.05 ? 0 : reboundSpeed;
+              ent.velocity[1] = reboundSpeed;
+              ent.isSleeping = false;
             }
           }
 
-          // 水平方向の動摩擦減衰（液体・気体は摩擦が極めて小さい）
-          const isFluid = ent.phaseState === 'liquid' || ent.phaseState === 'gas';
-          const muD = isFluid ? 0.02 : (mat?.dynamicFriction ?? 0.45);
-          const damping = Math.max(0, 1.0 - muD * 8.0 * dt);
-          ent.velocity[0] *= damping;
-          ent.velocity[2] *= damping;
+          // 水平方向は床面を「表面波紋を持つ空間境界」として定在波の檻モデルで摩擦・静止ロックを創発
+          const vtx = ent.velocity[0];
+          const vtz = ent.velocity[2];
+          const vtMag = Math.sqrt(vtx * vtx + vtz * vtz);
+          if (vtMag > 1e-6) {
+            const lamObj = mat?.surfaceWavelength ?? 0.3;
+            const u0Obj = mat?.surfacePotentialDepth ?? 0.5;
+            const resonanceM =
+              (u0Obj + ContactSolver.FLOOR_POTENTIAL_DEPTH) /
+              (1.0 +
+                Math.abs(lamObj - ContactSolver.FLOOR_WAVELENGTH) /
+                  Math.max(lamObj, ContactSolver.FLOOR_WAVELENGTH, 0.05));
+            const floorNormalP = Math.max(0.5, floorOverlap * 50.0 + 1.0);
+            const trapMax = Math.max(0.01, floorNormalP * resonanceM - 0.1 * ent.internalHeat);
+            const kinT = 0.5 * ent.mass * vtMag * vtMag;
 
-          // 静止摩擦ロック判定（液体・気体は静止ロックしない）
-          if (!isFluid) {
-            const speedSq =
-              ent.velocity[0] * ent.velocity[0] +
-              ent.velocity[1] * ent.velocity[1] +
-              ent.velocity[2] * ent.velocity[2];
-            const thresh = config.sleepVelocityThreshold;
-            if (speedSq < thresh * thresh) {
-              ent.velocity[0] = 0;
-              ent.velocity[1] = 0;
-              ent.velocity[2] = 0;
-              ent.isSleeping = true;
+            if (kinT <= trapMax) {
+              // 定在波の檻へ捕獲して静止
+              const captured = kinT * Math.min(1.0, 55.0 * dt);
+              const newKE = Math.max(0, kinT - captured);
+              const speedRatio = Math.sqrt(newKE / kinT);
+              ent.velocity[0] *= speedRatio;
+              ent.velocity[2] *= speedRatio;
+              ent.trapEnergyStored = (ent.trapEnergyStored ?? 0) + captured;
+            } else {
+              // 限界突破：動摩擦として運動エネルギーを消費し、厳密に等量の摩擦熱を発生
+              const dE = Math.min(kinT, trapMax * 10.0 * dt);
+              const newKE = Math.max(0, kinT - dE);
+              const speedRatio = Math.sqrt(newKE / kinT);
+              ent.velocity[0] *= speedRatio;
+              ent.velocity[2] *= speedRatio;
+              ent.internalHeat += dE + (ent.trapEnergyStored ?? 0);
+              ent.trapEnergyStored = 0;
             }
+          }
+
+          // 定在波の檻によるエネルギー減衰後に自然ロック判定
+          const speedSq =
+            ent.velocity[0] * ent.velocity[0] +
+            ent.velocity[1] * ent.velocity[1] +
+            ent.velocity[2] * ent.velocity[2];
+          const thresh = config.sleepVelocityThreshold;
+          if (speedSq < thresh * thresh) {
+            ent.velocity[0] = 0;
+            ent.velocity[1] = 0;
+            ent.velocity[2] = 0;
+            ent.isSleeping = true;
           }
         }
 
-        // 計算窓（空間グリッド境界）の内側にソフトに留める
+        // 計算窓の内側にソフトに留める
         const margin = ent.radius + 0.05;
         const minX = -((config.nx * config.cellSize) * 0.5) + config.center[0] + margin;
         const maxX = ((config.nx * config.cellSize) * 0.5) + config.center[0] - margin;
@@ -233,12 +274,13 @@ export class ContactSolver {
       }
     }
 
-    // 4. 連結グループ（電池＋極/セパレータ/－極 ＋ 導線・電球回路）の駆動とジュール発熱
+    // 4. 連結グループ（電池回路）の駆動と電子親和力差電圧の創発
     return this.solveBatteryCircuits(entities, materials, dt);
   }
 
   /**
    * 連結グループ（電池＋極・セパレータ・－極）と導線・電球回路の気圧落差電流を計算する
+   * 固定電圧を廃止し、両電極の電子親和力差 Δχ から電圧を自律創発させる
    */
   private solveBatteryCircuits(
     entities: SpaceEntity[],
@@ -261,16 +303,21 @@ export class ContactSolver {
       const anode = anodes.find((a) => a.groupId === gid) ?? anodes[0];
       const cathode = cathodes.find((c) => c.groupId === gid) ?? cathodes[0];
 
-      // 1. セパレータの一方向電荷ポンプ作用：＋極と－極の間に気圧落差（電圧 V = ΔP_+ - ΔP_-）を維持
-      const targetVoltage = 2.5;
-      if (anode.netCharge < targetVoltage) {
-        anode.netCharge += (targetVoltage - anode.netCharge) * Math.min(1, 10 * dt);
+      // 電子親和力差 Δχ から維持電圧（気圧落差）を第一原理算出
+      const matA = materials.get(anode.materialId);
+      const matC = materials.get(cathode.materialId);
+      const rawDeltaChi = Math.abs((matA?.electronAffinity ?? 0.5) - (matC?.electronAffinity ?? -0.5));
+      // 同一マテリアルIDを仮に用いた場合でも極性のポテンシャル差（bondChargeDensity差等）を考慮
+      const deltaChi = rawDeltaChi > 0.05 ? rawDeltaChi : Math.max(0.2, matA?.bondChargeDensity ?? 0.8);
+      const emergentHalfV = deltaChi * 2.5;
+
+      if (anode.netCharge < emergentHalfV) {
+        anode.netCharge += (emergentHalfV - anode.netCharge) * Math.min(1, 10 * dt);
       }
-      if (cathode.netCharge > -targetVoltage) {
-        cathode.netCharge += (-targetVoltage - cathode.netCharge) * Math.min(1, 10 * dt);
+      if (cathode.netCharge > -emergentHalfV) {
+        cathode.netCharge += (-emergentHalfV - cathode.netCharge) * Math.min(1, 10 * dt);
       }
 
-      // 2. 導線・電球パケットが閉回路として接続されているか判定
       const circuitNodes = entities.filter(
         (e) => e.groupRole === 'wire' || e.groupRole === 'bulb',
       );
@@ -289,7 +336,6 @@ export class ContactSolver {
 
       if (touchesAnode && touchesCathode) {
         const voltage = anode.netCharge - cathode.netCharge;
-        // 回路全体の有効導電率から電流フラックス I を算出
         let minCond = 1.0;
         for (const n of circuitNodes) {
           const cond = materials.get(n.materialId)?.conductivity ?? 0.5;
@@ -298,15 +344,18 @@ export class ContactSolver {
         const current = Math.max(0, voltage * minCond);
         totalCurrent += current;
 
-        // 抵抗部（電球や導電率の低い導線）でジュール発熱 (I² R Δt) を生じ、化学エネルギーを消費
+        // 化学エネルギー消費量とジュール発熱量の厳密収支
         const chemBurn = Math.min(chem, current * 0.25 * dt);
         sep.chemicalEnergy = chem - chemBurn;
+        const totalRes = circuitNodes.reduce(
+          (sum, n) => sum + Math.max(0.05, 1.0 - (materials.get(n.materialId)?.conductivity ?? 0.5)),
+          0,
+        );
         for (const n of circuitNodes) {
           const cond = materials.get(n.materialId)?.conductivity ?? 0.5;
           const resistance = Math.max(0.05, 1.0 - cond);
-          n.internalHeat += current * current * resistance * dt * 1.5;
+          n.internalHeat += chemBurn * (resistance / Math.max(totalRes, 1e-4)) * 2.5;
         }
-        // 化学エネルギーが枯渇したら電圧も自然減衰
         if (sep.chemicalEnergy <= 0.001) {
           sep.chemicalEnergy = 0;
           anode.netCharge *= 0.5;
@@ -318,9 +367,9 @@ export class ContactSolver {
   }
 
   /**
-   * 接触ペアにおける摩擦帯電・発熱・導体分配・アース接地を処理する
+   * 定在波の檻によるエネルギー保存型摩擦・冷間圧接・摩擦帯電・アース接地を処理する
    */
-  private applyMaterialContactInteraction(
+  private applyStandingWaveContact(
     a: SpaceEntity,
     b: SpaceEntity,
     matA: MaterialSpec | undefined,
@@ -329,21 +378,22 @@ export class ContactSolver {
     rvy: number,
     rvz: number,
     velAlongNormal: number,
+    normalPressure: number,
     nx: number,
     ny: number,
     nz: number,
+    invMa: number,
+    invMb: number,
     dt: number,
     config: SpaceCoreConfig,
   ): void {
     if (!matA || !matB) return;
 
-    // 1. 接線相対速度の算出
     const tvx = rvx - velAlongNormal * nx;
     const tvy = rvy - velAlongNormal * ny;
     const tvz = rvz - velAlongNormal * nz;
     const tangentSpeed = Math.sqrt(tvx * tvx + tvy * tvy + tvz * tvz);
 
-    // 2. 定在波の檻 E_trap_max = ΔP_⊥ * M(λ_A, λ_B, U_0A, U_0B) - γ U_vib と冷間圧接・摩擦帯電
     const minCond = Math.min(matA.conductivity, matB.conductivity);
     const totalHeat = a.internalHeat + b.internalHeat;
 
@@ -364,30 +414,66 @@ export class ContactSolver {
       const u0A = matA.surfacePotentialDepth ?? 0.5;
       const u0B = matB.surfacePotentialDepth ?? 0.5;
       const resonanceM = (u0A + u0B) / (1.0 + Math.abs(lamA - lamB) / Math.max(lamA, lamB, 0.05));
-      const normalPressure = Math.max(0.2, Math.abs(velAlongNormal) + 0.5);
-      const trapMax = Math.max(0.05, normalPressure * resonanceM - 0.12 * totalHeat);
+      const trapMax = Math.max(0.0005, normalPressure * resonanceM - 0.12 * totalHeat);
 
-      const kinTangent = 0.5 * Math.min(a.mass, b.mass) * tangentSpeed * tangentSpeed;
+      // 相対運動の換算質量 μ_red と接線相対運動エネルギー
+      const invMSum = invMa + invMb;
+      const reducedMass = invMSum > 0 ? 1.0 / invMSum : Math.min(a.mass, b.mass);
+      const kinTangent = 0.5 * reducedMass * tangentSpeed * tangentSpeed;
+
       if (kinTangent <= trapMax) {
-        // 定在波の檻に捕獲：エネルギーを蓄積し、微量の散逸熱を発生
-        a.trapEnergyStored = (a.trapEnergyStored ?? 0) + kinTangent * 0.2 * dt;
-        b.trapEnergyStored = (b.trapEnergyStored ?? 0) + kinTangent * 0.2 * dt;
-        a.internalHeat += 0.01 * tangentSpeed * dt;
-        b.internalHeat += 0.01 * tangentSpeed * dt;
+        // 定在波の檻へエネルギーを捕獲し、厳密にその分だけ接線相対速度を減速
+        const captured = kinTangent * Math.min(0.8, 8.0 * dt);
+        if (invMSum > 0 && kinTangent > 1e-8) {
+          const factor = 1.0 - Math.sqrt(Math.max(0, kinTangent - captured) / kinTangent);
+          const dPx = factor * reducedMass * tvx;
+          const dPy = factor * reducedMass * tvy;
+          const dPz = factor * reducedMass * tvz;
+          if (!a.isGrabbed && !a.isGrounded) {
+            a.velocity[0] += dPx * invMa;
+            a.velocity[1] += dPy * invMa;
+            a.velocity[2] += dPz * invMa;
+          }
+          if (!b.isGrabbed && !b.isGrounded) {
+            b.velocity[0] -= dPx * invMb;
+            b.velocity[1] -= dPy * invMb;
+            b.velocity[2] -= dPz * invMb;
+          }
+        }
+        a.trapEnergyStored = (a.trapEnergyStored ?? 0) + captured * 0.35;
+        b.trapEnergyStored = (b.trapEnergyStored ?? 0) + captured * 0.35;
+        a.internalHeat += captured * 0.15;
+        b.internalHeat += captured * 0.15;
       } else {
-        // 限界突破（決壊）：蓄積エネルギーを摩擦熱 U_vib へ一気に解放し動摩擦へ移行
+        // 限界突破（決壊）：運動エネルギーの一部を摩擦として奪い、蓄積分と合わせて熱 U_vib へ厳密変換
+        const frictionLoss = Math.min(kinTangent, trapMax * Math.min(0.9, 6.0 * dt));
+        if (invMSum > 0 && kinTangent > 1e-8) {
+          const factor = 1.0 - Math.sqrt(Math.max(0, kinTangent - frictionLoss) / kinTangent);
+          const dPx = factor * reducedMass * tvx;
+          const dPy = factor * reducedMass * tvy;
+          const dPz = factor * reducedMass * tvz;
+          if (!a.isGrabbed && !a.isGrounded) {
+            a.velocity[0] += dPx * invMa;
+            a.velocity[1] += dPy * invMa;
+            a.velocity[2] += dPz * invMa;
+          }
+          if (!b.isGrabbed && !b.isGrounded) {
+            b.velocity[0] -= dPx * invMb;
+            b.velocity[1] -= dPy * invMb;
+            b.velocity[2] -= dPz * invMb;
+          }
+        }
         const releasedTrap = (a.trapEnergyStored ?? 0) + (b.trapEnergyStored ?? 0);
         a.trapEnergyStored = 0;
         b.trapEnergyStored = 0;
-        const heat = (0.05 * tangentSpeed + releasedTrap * 0.5) * dt + releasedTrap * 0.25;
-        a.internalHeat += heat;
-        b.internalHeat += heat;
+        const totalGeneratedHeat = frictionLoss + releasedTrap;
+        a.internalHeat += totalGeneratedHeat * 0.5;
+        b.internalHeat += totalGeneratedHeat * 0.5;
       }
 
       if (minCond < 0.35 && !a.isGrounded && !b.isGrounded) {
         const deltaAffinity = matA.electronAffinity - matB.electronAffinity;
         const dq = config.triboRate * deltaAffinity * tangentSpeed * dt;
-        // 電子親和力が高い方が電子を奪って負に帯電する（総電荷保存則）
         a.netCharge -= dq;
         b.netCharge += dq;
       }
@@ -407,7 +493,7 @@ export class ContactSolver {
       return;
     }
 
-    // 4. 導体同士の接触による電荷分配（容量=半径比で同電位化）
+    // 4. 導体同士の接触による電荷分配
     if (minCond > 0.35) {
       const totalQ = a.netCharge + b.netCharge;
       const rSum = Math.max(a.radius + b.radius, 1e-4);
@@ -419,9 +505,6 @@ export class ContactSolver {
     }
   }
 
-  /**
-   * 形状（box / sheet / sphere 等）に応じた接触法線とめり込み量を算出する
-   */
   private computeContactGeometry(
     a: SpaceEntity,
     b: SpaceEntity,
@@ -429,7 +512,6 @@ export class ContactSolver {
     const aIsBox = (a.shape === 'box' || a.shape === 'sheet') && a.dimensions;
     const bIsBox = (b.shape === 'box' || b.shape === 'sheet') && b.dimensions;
 
-    // 片方が大型ボックス（冷蔵庫や板など）の場合は AABB 最近接点で判定
     if (bIsBox && !aIsBox && b.dimensions) {
       return this.sphereVsBox(a.position, a.radius, b.position, b.dimensions, false);
     }

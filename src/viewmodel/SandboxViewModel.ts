@@ -92,6 +92,7 @@ export class SandboxViewModel {
         rawDt,
         useObserver ? this.observer : undefined,
         this.repository.getCurrentMedium(),
+        this.repository.media,
       );
       this.lastMetrics = {
         ...res.metrics,
@@ -137,7 +138,7 @@ export class SandboxViewModel {
     mode: InjectorBrushMode,
     strength = 1.0,
   ): void {
-    this.core.getMediumSolver().injectBrush(this.core.grid, pos, radius, mode, strength);
+    this.core.injectBrush(pos, radius, mode, strength, this.repository.media);
     this.notify();
   }
 

@@ -2,20 +2,20 @@ import { BoundaryProjector } from './BoundaryProjector';
 import { ContactSolver } from './ContactSolver';
 import { CpuTypedArrayBackend } from './CpuTypedArrayBackend';
 import { DualPacketizer } from './DualPacketizer';
-import type { FieldSolver } from './FieldSolver';
 import type { ISpatialComputeBackend } from './ISpatialComputeBackend';
-import type { MediumFluxSolver } from './MediumFluxSolver';
 import { PerceptualScaler } from './PerceptualScaler';
 import { PhaseTransitionSolver } from './PhaseTransitionSolver';
 import { SpacePacketGrid } from './SpacePacketGrid';
 import type {
   AmbientMediumSpec,
   CoreStepMetrics,
+  InjectorBrushMode,
   MaterialSpec,
   ObserverState,
   ProjectedExternalSource,
   SpaceCoreConfig,
   SpaceEntity,
+  Vec3,
 } from './types';
 
 /**
@@ -33,7 +33,6 @@ export class SpaceEngineCore {
   private readonly boundaryProjector = new BoundaryProjector();
   private readonly contactSolver = new ContactSolver();
   private readonly phaseSolver = new PhaseTransitionSolver();
-  private absorbedBackgroundEnergy = 0;
 
   constructor(config: SpaceCoreConfig, backend: ISpatialComputeBackend = new CpuTypedArrayBackend()) {
     this.config = config;
@@ -54,25 +53,55 @@ export class SpaceEngineCore {
     this.grid.reset();
     this.dualPacketizer.reset();
     this.backend.reset();
-    this.absorbedBackgroundEnergy = 0;
   }
 
   public getBackend(): ISpatialComputeBackend {
     return this.backend;
   }
 
-  public getMediumSolver(): MediumFluxSolver {
-    if (this.backend instanceof CpuTypedArrayBackend) {
-      return this.backend.mediumSolver;
-    }
-    throw new Error('Current backend does not expose CpuTypedArrayBackend mediumSolver');
+  public injectBrush(
+    worldPos: Vec3,
+    radius: number,
+    mode: InjectorBrushMode,
+    strength = 1.0,
+    mediaCatalog?: ReadonlyMap<string, AmbientMediumSpec>,
+  ): void {
+    this.backend.injectBrush(this.grid, worldPos, radius, mode, strength, mediaCatalog);
   }
 
-  public getFieldSolver(): FieldSolver {
-    if (this.backend instanceof CpuTypedArrayBackend) {
-      return this.backend.fieldSolver;
-    }
-    throw new Error('Current backend does not expose CpuTypedArrayBackend fieldSolver');
+  public evaluateLightInteraction(
+    material: MaterialSpec | undefined,
+    lightFrequency: number,
+  ): { transmittance: number; reflectance: number; absorption: number } {
+    return this.backend.evaluateLightInteraction(material, lightFrequency);
+  }
+
+  public evaluateHollowTransmissionAndPermeation(
+    shellZ: number,
+    innerZ: number,
+    gapSpacing: number,
+    particleHardRadius: number,
+  ): { waveTransmittance: number; canPermeate: boolean } {
+    return this.backend.evaluateHollowTransmissionAndPermeation(
+      shellZ,
+      innerZ,
+      gapSpacing,
+      particleHardRadius,
+    );
+  }
+
+  public evaluateQuantumTunneling(
+    barrierHeight: number,
+    particleEnergy: number,
+    barrierWidth: number,
+    scaleL: number,
+  ): number {
+    return this.backend.evaluateQuantumTunneling(
+      barrierHeight,
+      particleEnergy,
+      barrierWidth,
+      scaleL,
+    );
   }
 
   public getPhaseSolver(): PhaseTransitionSolver {
@@ -94,6 +123,7 @@ export class SpaceEngineCore {
     rawDt: number,
     observer?: ObserverState,
     medium?: AmbientMediumSpec,
+    mediaCatalog?: ReadonlyMap<string, AmbientMediumSpec>,
   ): { metrics: CoreStepMetrics; entities: SpaceEntity[] } {
     let activeEntities = entities;
     let combinedExternalSources = [...externalSources];
@@ -107,7 +137,22 @@ export class SpaceEngineCore {
         this.config.cellSize,
         this.config.gravitationalConstant,
       );
-      this.absorbedBackgroundEnergy += scaleRes.absorbedEnergyDelta;
+
+      // 吸収された背景エネルギーを空間パケットの内部振動エネルギー U_vib へ還元
+      if (scaleRes.absorbedEnergyDelta > 0) {
+        let interiorCount = 0;
+        for (let i = 0; i < this.grid.count; i++) {
+          if (this.grid.isBoundary[i] === 0) interiorCount++;
+        }
+        if (interiorCount > 0) {
+          const perCell = scaleRes.absorbedEnergyDelta / interiorCount;
+          for (let i = 0; i < this.grid.count; i++) {
+            if (this.grid.isBoundary[i] === 0) {
+              this.grid.vibrationEnergy[i] += perCell;
+            }
+          }
+        }
+      }
 
       // スケール変化時は保存則リメッシュ
       this.grid.remesh(scaleRes.cellSize, scaleRes.windowCenter);
@@ -123,7 +168,11 @@ export class SpaceEngineCore {
       }
 
       // 空間パケットサイズとオブジェクトの Pack/Unpack 同期
-      activeEntities = this.dualPacketizer.synchronize(activeEntities, scaleRes.cellSize);
+      activeEntities = this.dualPacketizer.synchronize(
+        activeEntities,
+        scaleRes.cellSize,
+        materials,
+      );
     }
 
     // 2. 境界シェル射影（Projected 領域からの重力・遠方ポテンシャル焼き付け）
@@ -138,8 +187,9 @@ export class SpaceEngineCore {
       rawDt,
       this.config,
       medium,
+      mediaCatalog,
     );
-    const effectiveFrameDt = Math.min(Math.max(rawDt, 1e-5), 0.05);
+    const effectiveFrameDt = Math.min(Math.max(rawDt, 1e-5), this.config.maxFrameDt ?? 0.05);
 
     // 4. 不可侵バリア・定在波の檻摩擦・電池連結グループ回路解決
     const circuitCurrent = this.contactSolver.solve(
@@ -149,7 +199,10 @@ export class SpaceEngineCore {
       this.config,
     );
 
-    // 5. 相転移（連続秩序度 Ψ ∈ [0, 1]）・燃焼・気化集合体分散と環境熱緩和
+    // 5. エンティティ ⇄ 空間パケット間の双方向熱交換フラックス（C_med == 0 の真空では断熱）
+    this.exchangeThermalEnergyWithGrid(activeEntities, effectiveFrameDt);
+
+    // 6. 相転移（連続秩序度 Ψ ∈ [0, 1]）・燃焼・気化集合体分散と環境熱緩和
     activeEntities = this.phaseSolver.solve(
       activeEntities,
       materials,
@@ -162,9 +215,34 @@ export class SpaceEngineCore {
       metrics: {
         ...metrics,
         circuitCurrent,
-        totalEnergy: metrics.totalEnergy + this.absorbedBackgroundEnergy,
       },
       entities: activeEntities,
     };
+  }
+
+  /**
+   * エンティティの内部熱エネルギーと周囲空間パケット U_vib との双方向熱交換（真空 C_med=0 では断熱）
+   */
+  private exchangeThermalEnergyWithGrid(entities: SpaceEntity[], dt: number): void {
+    for (const ent of entities) {
+      if (ent.domainClass !== 'Visible') continue;
+      const [gx, gy, gz] = this.grid.worldToGrid(ent.position);
+      const ix = Math.max(1, Math.min(this.grid.nx - 2, Math.round(gx)));
+      const iy = Math.max(1, Math.min(this.grid.ny - 2, Math.round(gy)));
+      const iz = Math.max(1, Math.min(this.grid.nz - 2, Math.round(gz)));
+      const idx = this.grid.index(ix, iy, iz);
+
+      const cMed = this.grid.mediumConcentration[idx];
+      if (cMed <= 1e-4) continue; // 真空断熱
+
+      const packetHeat = this.grid.vibrationEnergy[idx];
+      const fluxCoeff = Math.min(0.4, 0.25 * cMed * dt);
+      const deltaQ = (packetHeat - ent.internalHeat) * fluxCoeff;
+      if (Math.abs(deltaQ) > 1e-7) {
+        ent.internalHeat = Math.max(0, ent.internalHeat + deltaQ);
+        this.grid.vibrationEnergy[idx] = Math.max(0, packetHeat - deltaQ);
+        this.grid.isSleeping[idx] = 0;
+      }
+    }
   }
 }

@@ -27,7 +27,7 @@ export class PhaseTransitionSolver {
   }
 
   /**
-   * エンティティの現在の相状態に応じた実効密度を返す
+   * エンティティの現在の相状態・中空構造に応じた実効密度を返す
    */
   public static getEffectiveDensity(
     entity: Readonly<SpaceEntity>,
@@ -40,6 +40,16 @@ export class PhaseTransitionSolver {
     }
     if (phase === 'gas') {
       return Math.max(1e-4, baseDensity * 0.0006);
+    }
+    if (material?.topology === 'hollow') {
+      const shellRatio = Math.max(0.01, Math.min(1.0, material.shellThicknessRatio ?? 0.08));
+      const shellVolumeRatio = 1.0 - Math.pow(1.0 - shellRatio, 3);
+      const innerDensity = entity.enclosedMediumDensity ?? 0;
+      const compositeDensity =
+        baseDensity * shellVolumeRatio + innerDensity * (1.0 - shellVolumeRatio);
+      const vol = (4.0 / 3.0) * Math.PI * entity.radius * entity.radius * entity.radius;
+      const apparentDensity = vol > 1e-5 ? entity.mass / vol : compositeDensity;
+      return Math.max(1e-4, Math.min(compositeDensity, apparentDensity));
     }
     return baseDensity;
   }
@@ -88,23 +98,41 @@ export class PhaseTransitionSolver {
         continue;
       }
 
-      // 1. 酸化還元による燃焼反応（酸素あり・発火点超過・残燃料あり）
+      // 1. 酸化還元による燃焼反応（局所酸素ポテンシャル・活性化障壁超過・残燃料あり）
       const fuel = ent.fuelRemaining ?? 1.0;
+      let localOxidizer = oxidizer;
+      let gridIdx = -1;
+      if (grid) {
+        const [gx, gy, gz] = grid.worldToGrid(ent.position);
+        gridIdx = grid.index(
+          Math.max(1, Math.min(grid.nx - 2, Math.round(gx))),
+          Math.max(1, Math.min(grid.ny - 2, Math.round(gy))),
+          Math.max(1, Math.min(grid.nz - 2, Math.round(gz))),
+        );
+        localOxidizer = grid.reactivityPotential[gridIdx];
+      }
       if (
-        oxidizer > 0.05 &&
-        mat.ignitionHeat !== undefined &&
-        ent.internalHeat >= mat.ignitionHeat &&
+        localOxidizer > 0.05 &&
+        mat.activationBarrier !== undefined &&
+        ent.internalHeat >= mat.activationBarrier &&
         fuel > 0.01
       ) {
         ent.isBurning = true;
         const consumed = Math.min(fuel, 0.15 * dt);
         ent.fuelRemaining = fuel - consumed;
-        const heatGain = (mat.combustionEnergy ?? 10.0) * oxidizer * dt * 2.5;
+        const wellDepth = mat.oxidizedWellDepth ?? 10.0;
+        const heatGain = wellDepth * localOxidizer * dt * 2.5;
         ent.internalHeat += heatGain;
         ent.isSleeping = false;
 
         // 燃焼による空間膨張圧と熱振動を周囲パケットへ注入（上昇気流・光波の創発）
         if (grid) {
+          if (gridIdx >= 0) {
+            grid.reactivityPotential[gridIdx] = Math.max(
+              0,
+              grid.reactivityPotential[gridIdx] - consumed * 0.1,
+            );
+          }
           this.injectCombustionEnergy(grid, ent.position, heatGain);
         }
       } else {
@@ -133,10 +161,9 @@ export class PhaseTransitionSolver {
         ent.isSleeping = false;
       }
 
-      // 3.5. 形状記憶合金の加熱復元（U_vib > E_act で準安定ポケットの障壁を越えて元の記憶形状へ帰還）
+      // 3.5. 準安定形状の加熱復元（U_vib > E_act で準安定ポケットの障壁を越えて元の記憶形状へ帰還：ID分岐なし）
       const eAct = mat.metastableWellBarrier ?? 2.5;
       if (
-        ent.materialId === 'shape_memory_alloy' &&
         ent.memorizedShapeScale &&
         ent.currentShapeScale &&
         ent.internalHeat >= eAct
@@ -206,7 +233,12 @@ export class PhaseTransitionSolver {
       ) {
         // 弾性エネルギー超過または金属疲労累積限界：結合破断し2つの破片へ分裂
         if (mat.topology === 'hollow' && grid) {
-          this.injectBurstShockwave(grid, ent.position, ent.elasticEnergy ?? 5.0);
+          this.injectBurstShockwave(
+            grid,
+            ent.position,
+            ent.elasticEnergy ?? 5.0,
+            ent.enclosedMediumDensity,
+          );
         }
         const fragments = this.fractureEntity(ent);
         nextEntities.push(...fragments);
@@ -233,13 +265,20 @@ export class PhaseTransitionSolver {
       return { elasticRecovered: 0, heatDissipated: 0, jammedResidual: 0 };
     }
 
-    // 一時的にミクロ4×4井戸へ展開して3分岐収支を計算
-    const overBarrier = Math.max(0, externalBendEnergy - barrier * 0.2);
-    const elasticRecovered = externalBendEnergy * 0.45;
-    const heatDissipated = overBarrier * 0.3;
-    const jammedResidual = overBarrier * 0.35;
+    // 一時的にミクロ4×4井戸へ展開して厳密エネルギー保存の3分岐収支を計算 (elasticFrac + heatFrac + jammedFrac === 1.0)
+    const yieldFactor =
+      externalBendEnergy > barrier * 0.2
+        ? (externalBendEnergy - barrier * 0.2) / externalBendEnergy
+        : 0;
+    const elasticFrac = 1.0 - 0.65 * yieldFactor;
+    const heatFrac = 0.3 * yieldFactor;
+    const jammedFrac = 0.35 * yieldFactor;
 
-    entity.elasticEnergy = (entity.elasticEnergy ?? 0) + elasticRecovered * 0.1;
+    const elasticRecovered = externalBendEnergy * elasticFrac;
+    const heatDissipated = externalBendEnergy * heatFrac;
+    const jammedResidual = externalBendEnergy * jammedFrac;
+
+    entity.elasticEnergy = (entity.elasticEnergy ?? 0) + elasticRecovered;
     entity.internalHeat += heatDissipated;
     entity.residualStrain = (entity.residualStrain ?? 0) + jammedResidual;
 
@@ -362,6 +401,7 @@ export class PhaseTransitionSolver {
     grid: SpacePacketGrid,
     pos: readonly [number, number, number],
     burstEnergy: number,
+    enclosedMediumDensity?: number,
   ): void {
     const [gx, gy, gz] = grid.worldToGrid([pos[0], pos[1], pos[2]]);
     const cx = Math.max(1, Math.min(grid.nx - 2, Math.round(gx)));
@@ -369,8 +409,10 @@ export class PhaseTransitionSolver {
     const cz = Math.max(1, Math.min(grid.nz - 2, Math.round(gz)));
     const cIdx = grid.index(cx, cy, cz);
     grid.phi[cIdx] += burstEnergy * 1.5;
-    grid.mediumDensity[cIdx] = 0.00018; // 封入ヘリウムの放出
-    grid.mediumConcentration[cIdx] = 1.0;
+    if (enclosedMediumDensity !== undefined) {
+      grid.mediumDensity[cIdx] = enclosedMediumDensity;
+      grid.mediumConcentration[cIdx] = 1.0;
+    }
     grid.isSleeping[cIdx] = 0;
 
     // 周囲6近傍へ放射状の圧力波（破裂音・衝撃波）を駆動

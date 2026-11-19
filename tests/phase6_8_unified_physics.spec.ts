@@ -128,11 +128,10 @@ describe('Phase 6-8: 統合空間演算アーキテクチャ v2.0 検証スイ�
     vm.setMedium('air');
 
     const grid = vm.core.grid;
-    const medSolver = vm.core.getMediumSolver();
-    medSolver.syncMediumBaseline(grid, vm.repository.getCurrentMedium());
+    vm.core.getBackend().syncMediumBaseline(grid, vm.repository.getCurrentMedium());
 
     const lowerPos = grid.packetCenter(8, 3, 8);
-    medSolver.injectBrush(grid, lowerPos, 0.5, 'hot_air', 2.0);
+    vm.core.injectBrush(lowerPos, 0.5, 'hot_air', 2.0, vm.repository.media);
     for (let i = 0; i < 10; i++) {
       vm.step(1 / 60);
     }
@@ -140,7 +139,7 @@ describe('Phase 6-8: 統合空間演算アーキテクチャ v2.0 検証スイ�
     expect(grid.py[idxLower]).toBeGreaterThan(0);
 
     const vacCenter = grid.packetCenter(8, 7, 8);
-    medSolver.injectBrush(grid, vacCenter, 2.0, 'vacuum', 1.0);
+    vm.core.injectBrush(vacCenter, 2.0, 'vacuum', 1.0, vm.repository.media);
     const idxHot = grid.index(8, 4, 8);
     const idxColdAcrossVac = grid.index(8, 11, 8);
     grid.vibrationEnergy[idxHot] = 20.0;
@@ -174,30 +173,28 @@ describe('Phase 6-8: 統合空間演算アーキテクチャ v2.0 検証スイ�
   it('6. 中空構造の空間的透過・浸透テスト: インピーダンス連続性による波動透過とすき間サイズ選別浸透が成立すること', () => {
     const repo = new SpaceStateRepository(createDefaultCoreConfig());
     const core = new SpaceEngineCore(repo.config);
-    const fieldSolver = core.getFieldSolver();
 
-    const matched = fieldSolver.evaluateHollowTransmissionAndPermeation(1.5, 1.5, 0.1, 0.03);
-    const mismatched = fieldSolver.evaluateHollowTransmissionAndPermeation(1.5, 8.0, 0.1, 0.03);
+    const matched = core.evaluateHollowTransmissionAndPermeation(1.5, 1.5, 0.1, 0.03);
+    const mismatched = core.evaluateHollowTransmissionAndPermeation(1.5, 8.0, 0.1, 0.03);
     expect(matched.waveTransmittance).toBeCloseTo(1.0, 4);
     expect(mismatched.waveTransmittance).toBeLessThan(0.6);
 
     expect(matched.canPermeate).toBe(true);
-    const blocked = fieldSolver.evaluateHollowTransmissionAndPermeation(1.5, 1.5, 0.1, 0.08);
+    const blocked = core.evaluateHollowTransmissionAndPermeation(1.5, 1.5, 0.1, 0.08);
     expect(blocked.canPermeate).toBe(false);
   });
 
   it('7. 光相互作用テスト: 固有共鳴周波数と導電率に応じて透過・鏡面反射・共鳴吸収発熱が分岐すること', () => {
     const repo = new SpaceStateRepository(createDefaultCoreConfig());
     const core = new SpaceEngineCore(repo.config);
-    const fieldSolver = core.getFieldSolver();
 
-    const glassRes = fieldSolver.evaluateLightInteraction(repo.materials.get('glass_prism'), 8.0);
+    const glassRes = core.evaluateLightInteraction(repo.materials.get('glass_prism'), 8.0);
     expect(glassRes.transmittance).toBeGreaterThan(0.85);
 
-    const metalRes = fieldSolver.evaluateLightInteraction(repo.materials.get('copper_wire'), 8.0);
+    const metalRes = core.evaluateLightInteraction(repo.materials.get('copper_wire'), 8.0);
     expect(metalRes.reflectance).toBeGreaterThan(0.85);
 
-    const resAbs = fieldSolver.evaluateLightInteraction(repo.materials.get('tungsten_bulb'), 6.0);
+    const resAbs = core.evaluateLightInteraction(repo.materials.get('tungsten_bulb'), 6.0);
     expect(resAbs.absorption).toBeGreaterThan(0.7);
   });
 
@@ -354,11 +351,10 @@ describe('Phase 6-8: 統合空間演算アーキテクチャ v2.0 検証スイ�
     };
     repo.entities = [crystalSeed];
     const core = new SpaceEngineCore(repo.config);
-    const fieldSolver = core.getFieldSolver();
 
     // 1. 量子トンネル効果: スケールが極小ほど障壁透過確率が大きくなること
-    const tMacro = fieldSolver.evaluateQuantumTunneling(10.0, 2.0, 1.0, 1.0);
-    const tMicro = fieldSolver.evaluateQuantumTunneling(10.0, 2.0, 1.0, 1e-6);
+    const tMacro = core.evaluateQuantumTunneling(10.0, 2.0, 1.0, 1.0);
+    const tMicro = core.evaluateQuantumTunneling(10.0, 2.0, 1.0, 1e-6);
     expect(tMicro).toBeGreaterThan(tMacro);
     expect(tMicro).toBeGreaterThan(0.9);
 

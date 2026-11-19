@@ -41,6 +41,7 @@ export class MediumFluxSolver {
     radius: number,
     mode: InjectorBrushMode,
     strength = 1.0,
+    mediaCatalog?: ReadonlyMap<string, AmbientMediumSpec>,
   ): void {
     const r2 = radius * radius;
     for (let z = 1; z < grid.nz - 1; z++) {
@@ -68,11 +69,16 @@ export class MediumFluxSolver {
               grid.mediumConcentration[idx] = Math.max(grid.mediumConcentration[idx], 0.9 * falloff);
               grid.mediumDensity[idx] += 0.005 * strength * falloff;
               break;
-            case 'helium':
-              grid.mediumConcentration[idx] = Math.max(grid.mediumConcentration[idx], 1.0 * falloff);
-              grid.mediumDensity[idx] = 0.00018; // 低密度ヘリウム
+            case 'helium': {
+              const heDensity = mediaCatalog?.get('helium')?.density ?? 0.00018;
+              const mixWeight = Math.max(0, Math.min(1, falloff * Math.min(1, strength)));
+              grid.mediumConcentration[idx] = Math.max(grid.mediumConcentration[idx], mixWeight);
+              grid.mediumDensity[idx] =
+                grid.mediumDensity[idx] * (1.0 - mixWeight) + heDensity * mixWeight;
+              grid.reactivityPotential[idx] *= 1.0 - mixWeight;
               grid.py[idx] += 1.5 * strength * falloff;
               break;
+            }
             case 'oxygen':
               grid.mediumConcentration[idx] = Math.max(grid.mediumConcentration[idx], 1.0 * falloff);
               grid.reactivityPotential[idx] = Math.min(1.0, grid.reactivityPotential[idx] + 0.5 * strength * falloff);
@@ -102,24 +108,29 @@ export class MediumFluxSolver {
     grid: SpacePacketGrid,
     backgroundField: Vec3,
     dt: number,
+    maxSubDt = 0.02,
   ): void {
     const { nx, ny, nz } = grid;
-    const clampedDt = Math.min(dt, 0.02);
+    const clampedDt = Math.min(dt, maxSubDt);
+    const thermalExpansionAlpha = 0.25;
 
-    // 1. 平均熱エネルギーを算出（対流の基準温度）
-    let sumHeat = 0;
+    // 1. 平均実効媒質密度を算出（密度差アルキメデス浮力対流の基準）
+    let sumEffDensity = 0;
     let medCount = 0;
     for (let i = 0; i < grid.count; i++) {
-      if (grid.mediumConcentration[i] > 0.01 && grid.isBoundary[i] === 0) {
-        sumHeat += grid.vibrationEnergy[i];
+      const c = grid.mediumConcentration[i];
+      if (c > 0.01 && grid.isBoundary[i] === 0) {
+        const rhoEff =
+          (grid.mediumDensity[i] * c) / (1.0 + thermalExpansionAlpha * Math.max(0, grid.vibrationEnergy[i]));
+        sumEffDensity += rhoEff;
         medCount++;
       }
     }
     if (medCount === 0) return; // 完全真空（全パケット C_med = 0）なら媒質チャネル計算を丸ごとスキップ
 
-    const meanHeat = sumHeat / medCount;
+    const meanEffDensity = sumEffDensity / medCount;
     const condRate = 0.12; // 媒質間の熱伝導係数（最大安定範囲 < 1/6）
-    const diffRate = 0.12; // 媒質濃度の拡散係数
+    const diffRate = 0.12; // 媒質濃度・反応ポテンシャルの拡散係数
 
     for (let z = 1; z < nz - 1; z++) {
       for (let y = 1; y < ny - 1; y++) {
@@ -131,6 +142,7 @@ export class MediumFluxSolver {
           if (cHere <= 1e-4) {
             grid.mediumConcentrationNext[idx] = 0;
             grid.mediumDensityNext[idx] = 0;
+            grid.reactivityPotential[idx] = 0;
             continue;
           }
 
@@ -146,43 +158,98 @@ export class MediumFluxSolver {
           let heatFlux = 0;
           let concFlux = 0;
           let densFlux = 0;
+          let oxFlux = 0;
 
           for (const nIdx of neighbors) {
             if (grid.isBoundary[nIdx] === 1) continue;
             const cOther = grid.mediumConcentration[nIdx];
-            // 隣接が真空 (cOther == 0) の場合、熱伝導フラックスは 0（真空断熱の成立）
+            // 隣接が真空 (cOther == 0) の場合、熱伝導・物質拡散フラックスは 0（真空断熱の成立）
             const interfaceCond = Math.min(cHere, cOther);
             if (interfaceCond > 1e-4) {
               heatFlux += (grid.vibrationEnergy[nIdx] - grid.vibrationEnergy[idx]) * interfaceCond;
               densFlux += (grid.mediumDensity[nIdx] - grid.mediumDensity[idx]) * interfaceCond;
+              oxFlux += (grid.reactivityPotential[nIdx] - grid.reactivityPotential[idx]) * interfaceCond;
             }
-            concFlux += grid.mediumConcentration[nIdx] - cHere;
+            concFlux += cOther - cHere;
           }
 
-          // 熱伝導による振動エネルギー更新
-          grid.vibrationEnergy[idx] += heatFlux * condRate * clampedDt * 8.0;
-          grid.mediumConcentrationNext[idx] = Math.max(0, Math.min(1, cHere + concFlux * diffRate * clampedDt * 6.0));
-          grid.mediumDensityNext[idx] = Math.max(0, grid.mediumDensity[idx] + densFlux * diffRate * clampedDt * 6.0);
+          // 熱伝導・拡散・酸化剤反応ポテンシャルの更新
+          grid.vibrationEnergy[idx] = Math.max(
+            0,
+            grid.vibrationEnergy[idx] + heatFlux * condRate * clampedDt * 8.0,
+          );
+          grid.mediumConcentrationNext[idx] = Math.max(
+            0,
+            Math.min(1, cHere + concFlux * diffRate * clampedDt * 6.0),
+          );
+          grid.mediumDensityNext[idx] = Math.max(
+            0,
+            grid.mediumDensity[idx] + densFlux * diffRate * clampedDt * 6.0,
+          );
+          grid.reactivityPotential[idx] = Math.max(
+            0,
+            Math.min(1, grid.reactivityPotential[idx] + oxFlux * diffRate * clampedDt * 6.0),
+          );
 
-          // 浮力駆動対流（高温または低密度の媒質は重力と逆向き＝上向きに上昇し、熱を上方へ運ぶ）
-          const heatExcess = grid.vibrationEnergy[idx] - meanHeat;
-          if (Math.abs(heatExcess) > 1e-4) {
-            // 重力場 backgroundField が下向き (-y) のとき、heatExcess > 0 で上向き (+y) 対流
-            const convAccelY = -backgroundField[1] * heatExcess * 0.25 * cHere;
-            grid.py[idx] += convAccelY * clampedDt;
+          // 密度差アルキメデス浮力対流：ρ_eff = ρ_med * C_med / (1 + α * U_vib)
+          // 熱気やヘリウムのように周辺平均より低密度の媒質は重力と逆向きに上昇し、冷気は下降する
+          const effDensity =
+            (grid.mediumDensity[idx] * cHere) /
+            (1.0 + thermalExpansionAlpha * Math.max(0, grid.vibrationEnergy[idx]));
+          const densityDiff = meanEffDensity - effDensity;
+          if (Math.abs(densityDiff) > 1e-7 && meanEffDensity > 1e-7) {
+            const buoyAccelScale = (densityDiff / meanEffDensity) * 0.65 * cHere;
+            grid.px[idx] -= backgroundField[0] * buoyAccelScale * clampedDt;
+            grid.py[idx] -= backgroundField[1] * buoyAccelScale * clampedDt;
+            grid.pz[idx] -= backgroundField[2] * buoyAccelScale * clampedDt;
             grid.isSleeping[idx] = 0;
           }
 
-          // 対流移流（上向き気流 py > 0 により、下層の熱エネルギーを上方パケットへ運ぶ）
+          // 3軸風上移流（px, py, pz に沿って熱エネルギー U_vib と酸化剤ポテンシャルを輸送）
+          const vx = grid.px[idx];
           const vy = grid.py[idx];
+          const vz = grid.pz[idx];
+
+          if (Math.abs(vx) > 0.02) {
+            const targetX = vx > 0 ? Math.min(nx - 2, x + 1) : Math.max(1, x - 1);
+            const tIdx = grid.index(targetX, y, z);
+            if (grid.mediumConcentration[tIdx] > 1e-4) {
+              const frac = Math.min(0.12, Math.abs(vx) * clampedDt * 0.45);
+              const heatMove = frac * grid.vibrationEnergy[idx];
+              const oxMove = frac * grid.reactivityPotential[idx];
+              grid.vibrationEnergy[idx] -= heatMove;
+              grid.vibrationEnergy[tIdx] += heatMove;
+              grid.reactivityPotential[idx] = Math.max(0, grid.reactivityPotential[idx] - oxMove);
+              grid.reactivityPotential[tIdx] = Math.min(1, grid.reactivityPotential[tIdx] + oxMove);
+              grid.isSleeping[tIdx] = 0;
+            }
+          }
           if (Math.abs(vy) > 0.02) {
             const targetY = vy > 0 ? Math.min(ny - 2, y + 1) : Math.max(1, y - 1);
-            const targetIdx = grid.index(x, targetY, z);
-            if (grid.mediumConcentration[targetIdx] > 1e-4) {
-              const transfer = Math.min(0.15, Math.abs(vy) * clampedDt * 0.5) * grid.vibrationEnergy[idx];
-              grid.vibrationEnergy[idx] -= transfer;
-              grid.vibrationEnergy[targetIdx] += transfer;
-              grid.isSleeping[targetIdx] = 0;
+            const tIdx = grid.index(x, targetY, z);
+            if (grid.mediumConcentration[tIdx] > 1e-4) {
+              const frac = Math.min(0.12, Math.abs(vy) * clampedDt * 0.45);
+              const heatMove = frac * grid.vibrationEnergy[idx];
+              const oxMove = frac * grid.reactivityPotential[idx];
+              grid.vibrationEnergy[idx] -= heatMove;
+              grid.vibrationEnergy[tIdx] += heatMove;
+              grid.reactivityPotential[idx] = Math.max(0, grid.reactivityPotential[idx] - oxMove);
+              grid.reactivityPotential[tIdx] = Math.min(1, grid.reactivityPotential[tIdx] + oxMove);
+              grid.isSleeping[tIdx] = 0;
+            }
+          }
+          if (Math.abs(vz) > 0.02) {
+            const targetZ = vz > 0 ? Math.min(nz - 2, z + 1) : Math.max(1, z - 1);
+            const tIdx = grid.index(x, y, targetZ);
+            if (grid.mediumConcentration[tIdx] > 1e-4) {
+              const frac = Math.min(0.12, Math.abs(vz) * clampedDt * 0.45);
+              const heatMove = frac * grid.vibrationEnergy[idx];
+              const oxMove = frac * grid.reactivityPotential[idx];
+              grid.vibrationEnergy[idx] -= heatMove;
+              grid.vibrationEnergy[tIdx] += heatMove;
+              grid.reactivityPotential[idx] = Math.max(0, grid.reactivityPotential[idx] - oxMove);
+              grid.reactivityPotential[tIdx] = Math.min(1, grid.reactivityPotential[tIdx] + oxMove);
+              grid.isSleeping[tIdx] = 0;
             }
           }
         }
