@@ -220,3 +220,16 @@
 5. **秩序度 $\Psi \in [0, 1]$ と表面張力・透過浸透：**
    * 結合維持率（秩序度）$\Psi = \text{clamp}(1 - U_{\text{vib}} / E_{\text{bind}}, 0, 1)$ による連続的な相遷移（`1.0`=固体, `0.2〜0.8`=液体, `0.0`=気体）。
    * 境界双極子非対称性による表面張力、空間インピーダンス連続性による波動透過、すき間 $d_{\text{gap}}$ と不可侵バリア半径 $R_{\text{hard}}$ によるサイズ選別浸透。
+
+---
+
+## 8. Phase 8 拡張：素粒子歪み核・多安定ポテンシャル井戸・自己組織化
+
+1. **計算バックエンド抽象化（`ISpatialComputeBackend`）：**
+   * `SpaceEngineCore` と演算実装を `ISpatialComputeBackend` で疎結合化し、デフォルト実装 `CpuTypedArrayBackend` を通じて将来の WebGPU / Rust-WASM / 量子MERA バックエンドへ差し替え可能にする。
+2. **多安定ポテンシャル井戸とエネルギー3分岐収支（疲労・形状記憶）：**
+   * 外部加圧・曲げエネルギー $\Delta E_{\text{external}}$ は ①弾性復元 $\Delta E_{\text{elastic}}$、②熱振動発散 $\Delta U_{\text{vib}}$、③残留空間歪み $\delta E_{\text{jammed}}$（`residualStrain`）へ分岐する。
+   * **オンデマンド・ミクロ展開（Lazy Micro-Unpack）：** 外圧・熱が閾値を超えた局所オブジェクトのみ一時的にミクロ格子へ展開し、金属疲労の累積破断および形状記憶合金の加熱復元（$U_{\text{vib}} > E_{\text{act}}$）を $O(1)$ コストで計算する。
+3. **極小スケールの量子トンネル効果と自己組織化結晶：**
+   * 極小スケール（$\log_{10} L \ll 0$）では真空チャネルの波動染み出し（トンネル透過 $T \propto \exp(-2\kappa d)$）が創発する。
+   * 冷却固化（$\Psi \to 1$）時は `anisotropyAxis` と $\nabla U_{\text{vib}}$ に沿って対称結晶パターンが自己組織化する。

@@ -5,7 +5,7 @@ import type { SpaceEntity } from '../src/core/types';
 import { createDefaultCoreConfig, SpaceStateRepository } from '../src/data/SpaceStateRepository';
 import { SandboxViewModel } from '../src/viewmodel/SandboxViewModel';
 
-describe('Phase 6-7: 統合空間演算アーキテクチャ検証スイート (9項目)', () => {
+describe('Phase 6-8: 統合空間演算アーキテクチャ v2.0 検証スイート (11項目)', () => {
   it('1. 定在波の檻による摩擦と動摩擦低下テスト: 限界突破時の熱放出により動摩擦へ移行すること', () => {
     const repo = new SpaceStateRepository(createDefaultCoreConfig());
     repo.externalSources = [];
@@ -30,7 +30,7 @@ describe('Phase 6-7: 統合空間演算アーキテクチャ検証スイート (
       id: 'slider',
       materialId: 'rubber_balloon',
       position: [0, 0.55, 0],
-      velocity: [3.5, -0.5, 0], // 限界を超える強い接線速度
+      velocity: [3.5, -0.5, 0],
       angularVelocity: [0, 0, 0],
       radius: 0.2,
       mass: 1.0,
@@ -47,7 +47,6 @@ describe('Phase 6-7: 統合空間演算アーキテクチャ検証スイート (
     repo.entities = [a, b];
     const core = new SpaceEngineCore(repo.config);
 
-    // 接触して限界突破・決壊すると蓄積エネルギーが熱 U_vib へ放出される
     core.step(repo.entities, repo.materials, repo.externalSources, 1 / 60);
     expect(b.internalHeat).toBeGreaterThan(0.1);
     expect(b.trapEnergyStored).toBe(0);
@@ -61,7 +60,6 @@ describe('Phase 6-7: 統合空間演算アーキテクチャ検証スイート (
     const bulb = vm.repository.entities.find((e) => e.groupRole === 'bulb')!;
     const initChem = sep.chemicalEnergy!;
 
-    // 導線と電球が接続された状態で電流が流れ、電球がジュール発熱すること
     for (let i = 0; i < 30; i++) {
       vm.step(1 / 60);
     }
@@ -70,7 +68,6 @@ describe('Phase 6-7: 統合空間演算アーキテクチャ検証スイート (
     expect(bulb.internalHeat).toBeGreaterThan(0.05);
     expect(sep.chemicalEnergy!).toBeLessThan(initChem);
 
-    // 化学エネルギーが枯渇すると電流が停止すること
     sep.chemicalEnergy = 0;
     vm.step(1 / 60);
     expect(vm.getUiState().circuitCurrent).toBe(0);
@@ -106,14 +103,13 @@ describe('Phase 6-7: 統合空間演算アーキテクチャ検証スイート (
       netCharge: 1.0,
       dipoleMoment: [0, 0, 0],
       magneticMoment: [0, 0, 0],
-      internalHeat: 16.0, // 局所ホットスポット
+      internalHeat: 16.0,
       isGrounded: false,
       isGrabbed: false,
       isSleeping: false,
       domainClass: 'Visible',
     };
 
-    // 1. 粗視化 (L = 2.0m) で統合：2次分散・極値・異方性軸・臨界フラグが保持される
     const packed = packetizer.synchronize([coldPart, hotSpot], 2.0);
     const cluster = packed.find((e) => e.id.startsWith('cluster_'))!;
     expect(cluster).toBeDefined();
@@ -122,7 +118,6 @@ describe('Phase 6-7: 統合空間演算アーキテクチャ検証スイート (
     expect(Math.abs(cluster.anisotropyAxis![0])).toBeGreaterThan(0.1);
     expect(cluster.isCriticalSubgrid).toBe(true);
 
-    // 2. 臨界アップスケールトリガーにより、粗いスケールのままでも次ステップで即座に展開されること
     const unpacked = packetizer.synchronize(packed, 2.0);
     expect(unpacked.some((e) => e.id.startsWith('cluster_'))).toBe(false);
   });
@@ -136,7 +131,6 @@ describe('Phase 6-7: 統合空間演算アーキテクチャ検証スイート (
     const medSolver = vm.core.getMediumSolver();
     medSolver.syncMediumBaseline(grid, vm.repository.getCurrentMedium());
 
-    // 1. 下部 (y=2) を温風加熱すると、上向き気流 (py > 0) による対流が起きること
     const lowerPos = grid.packetCenter(8, 3, 8);
     medSolver.injectBrush(grid, lowerPos, 0.5, 'hot_air', 2.0);
     for (let i = 0; i < 10; i++) {
@@ -145,7 +139,6 @@ describe('Phase 6-7: 統合空間演算アーキテクチャ検証スイート (
     const idxLower = grid.index(8, 3, 8);
     expect(grid.py[idxLower]).toBeGreaterThan(0);
 
-    // 2. 中間層 (y=7) を真空吸引 (C_med = 0) すると、y=5 の熱が y=9 へ伝導遮断されること
     const vacCenter = grid.packetCenter(8, 7, 8);
     medSolver.injectBrush(grid, vacCenter, 2.0, 'vacuum', 1.0);
     const idxHot = grid.index(8, 4, 8);
@@ -155,7 +148,6 @@ describe('Phase 6-7: 統合空間演算アーキテクチャ検証スイート (
     for (let i = 0; i < 10; i++) {
       vm.step(1 / 60);
     }
-    // 真空断熱により反対側へ熱がほとんど伝わらない
     expect(grid.vibrationEnergy[idxColdAcrossVac] - coldBefore).toBeLessThan(0.05);
   });
 
@@ -165,13 +157,11 @@ describe('Phase 6-7: 統合空間演算アーキテクチャ検証スイート (
     const balloon = vm.repository.entities.find((e) => e.id === 'he_balloon')!;
     const initY = balloon.position[1];
 
-    // 1. 空気中でアルキメデス浮力により自然に浮上すること
     for (let i = 0; i < 45; i++) {
       vm.step(1 / 60);
     }
     expect(balloon.position[1]).toBeGreaterThan(initY + 0.05);
 
-    // 外殻破断 (elasticEnergy > bindingEnergy) で破裂：破片分裂と放射状圧力波が生成される
     balloon.elasticEnergy = 25.0;
     vm.step(1 / 60);
     const frags = vm.repository.entities.filter((e) => e.id.includes('_frag_'));
@@ -186,13 +176,11 @@ describe('Phase 6-7: 統合空間演算アーキテクチャ検証スイート (
     const core = new SpaceEngineCore(repo.config);
     const fieldSolver = core.getFieldSolver();
 
-    // インピーダンスが一致 (Z1 = Z2 = 1.5) なら波動は 100% 透過、不整合なら反射が増える
     const matched = fieldSolver.evaluateHollowTransmissionAndPermeation(1.5, 1.5, 0.1, 0.03);
     const mismatched = fieldSolver.evaluateHollowTransmissionAndPermeation(1.5, 8.0, 0.1, 0.03);
     expect(matched.waveTransmittance).toBeCloseTo(1.0, 4);
     expect(mismatched.waveTransmittance).toBeLessThan(0.6);
 
-    // すき間 d_gap = 0.1 に対し、小粒子 (r=0.03 -> 径0.06) は浸透可能、大粒子 (r=0.08 -> 径0.16) は不可
     expect(matched.canPermeate).toBe(true);
     const blocked = fieldSolver.evaluateHollowTransmissionAndPermeation(1.5, 1.5, 0.1, 0.08);
     expect(blocked.canPermeate).toBe(false);
@@ -203,15 +191,12 @@ describe('Phase 6-7: 統合空間演算アーキテクチャ検証スイート (
     const core = new SpaceEngineCore(repo.config);
     const fieldSolver = core.getFieldSolver();
 
-    // ガラスプリズム (ω0=20, 絶縁体) に可視光 (ω=8) → 高透過
     const glassRes = fieldSolver.evaluateLightInteraction(repo.materials.get('glass_prism'), 8.0);
     expect(glassRes.transmittance).toBeGreaterThan(0.85);
 
-    // 銅線 (ω0=15, 良導体) に低周波光 (ω=8) → 高反射
     const metalRes = fieldSolver.evaluateLightInteraction(repo.materials.get('copper_wire'), 8.0);
     expect(metalRes.reflectance).toBeGreaterThan(0.85);
 
-    // タングステン (ω0=6) に共鳴光 (ω=6) → 共鳴吸収発熱
     const resAbs = fieldSolver.evaluateLightInteraction(repo.materials.get('tungsten_bulb'), 6.0);
     expect(resAbs.absorption).toBeGreaterThan(0.7);
   });
@@ -229,7 +214,7 @@ describe('Phase 6-7: 統合空間演算アーキテクチャ検証スイート (
       mass: 1.0,
       netCharge: 0,
       dipoleMoment: [0, 0, 0],
-      magneticMoment: [0, 0, 0], // 初期は非着磁
+      magneticMoment: [0, 0, 0],
       internalHeat: 0,
       isGrounded: false,
       isGrabbed: false,
@@ -239,7 +224,6 @@ describe('Phase 6-7: 統合空間演算アーキテクチャ検証スイート (
     repo.entities = [iron];
     const core = new SpaceEngineCore(repo.config);
 
-    // 1. 保磁力障壁 (0.25) を超える強い外部渦度を印加 → 着磁（磁気モーメント獲得）
     core.grid.wy.fill(2.5);
     core.grid.isSleeping.fill(0);
     for (let i = 0; i < 15; i++) {
@@ -247,9 +231,8 @@ describe('Phase 6-7: 統合空間演算アーキテクチャ検証スイート (
     }
     expect(iron.magneticMoment[1]).toBeGreaterThan(1.0);
 
-    // 2. 加熱して秩序度 Ψ を低下させる (Ψ < 0.35) → 熱擾乱により消磁すること
     core.grid.wy.fill(0);
-    iron.internalHeat = 85.0; // bindingEnergy=100 → Ψ = 0.15 < 0.35
+    iron.internalHeat = 85.0;
     for (let i = 0; i < 30; i++) {
       core.step(repo.entities, repo.materials, repo.externalSources, 1 / 60);
     }
@@ -257,7 +240,6 @@ describe('Phase 6-7: 統合空間演算アーキテクチャ検証スイート (
   });
 
   it('9. 極限状態テスト: 極低温同種接触での冷間圧接 ＆ 臨界エネルギー集中でのブラックホール自己捕獲', () => {
-    // (a) 冷間圧接 (Cold Welding)
     const repoCW = new SpaceStateRepository(createDefaultCoreConfig());
     repoCW.externalSources = [];
     repoCW.entities = [
@@ -272,7 +254,7 @@ describe('Phase 6-7: 統合空間演算アーキテクチャ検証スイート (
         netCharge: 0,
         dipoleMoment: [0, 0, 0],
         magneticMoment: [0, 0, 0],
-        internalHeat: 0.005, // 極低温
+        internalHeat: 0.005,
         isGrounded: false,
         isGrabbed: false,
         isSleeping: false,
@@ -289,7 +271,7 @@ describe('Phase 6-7: 統合空間演算アーキテクチャ検証スイート (
         netCharge: 0,
         dipoleMoment: [0, 0, 0],
         magneticMoment: [0, 0, 0],
-        internalHeat: 0.005, // 極低温
+        internalHeat: 0.005,
         isGrounded: false,
         isGrabbed: false,
         isSleeping: false,
@@ -301,11 +283,9 @@ describe('Phase 6-7: 統合空間演算アーキテクチャ検証スイート (
     expect(repoCW.entities[0].isColdWelded).toBe(true);
     expect(repoCW.entities[1].isColdWelded).toBe(true);
 
-    // (b) 高密度光焦点によるブラックホール（事象の地平面）創発と周囲物体の捕獲
     const vm = new SandboxViewModel();
     vm.loadPreset('black_hole_horizon');
     const c = vm.core.config.center;
-    // 光パルスを一点に集中注入して非線形屈折率の臨界を超えさせる
     vm.injectBrushAt(c, 0.5, 'light_pulse', 8.0);
     const probe = vm.repository.entities.find((e) => e.id === 'orbit_probe')!;
     const initProbeX = probe.position[0];
@@ -316,5 +296,77 @@ describe('Phase 6-7: 統合空間演算アーキテクチャ検証スイート (
     const state = vm.getUiState();
     expect(state.eventHorizonCount).toBeGreaterThan(0);
     expect(probe.position[0]).toBeLessThan(initProbeX - 0.1);
+  });
+
+  it('10. 金属疲労の累積破断と形状記憶合金の加熱復元テスト: Lazy Micro-Unpack による3分岐収支と復元', () => {
+    const vm = new SandboxViewModel();
+    vm.loadPreset('fatigue_and_shape_memory');
+
+    const wire = vm.repository.entities.find((e) => e.id === 'fatigue_wire')!;
+    const wireMat = vm.repository.materials.get(wire.materialId);
+    const phaseSolver = vm.core.getPhaseSolver();
+
+    // 1. 繰り返し曲げを加えると熱と残留歪みが蓄積し、疲労限界 (2.5) 超過で破断すること
+    for (let cycle = 0; cycle < 8; cycle++) {
+      const res = phaseSolver.applyLazyMicroBending(wire, wireMat, 1.5, vm.core.grid);
+      expect(res.heatDissipated).toBeGreaterThan(0);
+      expect(res.jammedResidual).toBeGreaterThan(0);
+    }
+    vm.step(1 / 60);
+    const wireFrags = vm.repository.entities.filter((e) => e.id.startsWith('fatigue_wire_frag_'));
+    expect(wireFrags.length).toBe(2);
+
+    // 2. 形状記憶合金: 加熱 (U_vib > E_act) により記憶された元の形状 [1,1,1] へ復元すること
+    const sma = vm.repository.entities.find((e) => e.id === 'sma_spring')!;
+    expect(sma.currentShapeScale![0]).toBeCloseTo(1.4, 2);
+    sma.internalHeat = 4.0; // metastableWellBarrier (2.2) 以上へ加熱
+    for (let i = 0; i < 25; i++) {
+      vm.step(1 / 60);
+    }
+    expect(sma.currentShapeScale![0]).toBeLessThan(1.1);
+    expect(sma.currentShapeScale![1]).toBeGreaterThan(0.9);
+    expect(sma.residualStrain!).toBeLessThan(0.2);
+  });
+
+  it('11. マルチスケール極小での波動染み出し(量子トンネル)＆自己組織化結晶ロックテスト', () => {
+    const repo = new SpaceStateRepository({
+      ...createDefaultCoreConfig(),
+      cellSize: 1e-4, // 極小スケール
+    });
+    repo.externalSources = [];
+    const crystalSeed: SpaceEntity = {
+      id: 'crystal_seed',
+      materialId: 'ice',
+      position: [0, 1.5, 0],
+      velocity: [0, 0, 0],
+      angularVelocity: [0, 0, 0],
+      radius: 0.0002,
+      mass: 1e-5,
+      netCharge: 0,
+      dipoleMoment: [0, 0, 0],
+      magneticMoment: [0, 0, 0],
+      internalHeat: 0.1, // Ψ = 0.95 >= 0.85 (冷却固化中)
+      anisotropyAxis: [1, 1, 0],
+      isGrounded: false,
+      isGrabbed: false,
+      isSleeping: false,
+      domainClass: 'Visible',
+    };
+    repo.entities = [crystalSeed];
+    const core = new SpaceEngineCore(repo.config);
+    const fieldSolver = core.getFieldSolver();
+
+    // 1. 量子トンネル効果: スケールが極小ほど障壁透過確率が大きくなること
+    const tMacro = fieldSolver.evaluateQuantumTunneling(10.0, 2.0, 1.0, 1.0);
+    const tMicro = fieldSolver.evaluateQuantumTunneling(10.0, 2.0, 1.0, 1e-6);
+    expect(tMicro).toBeGreaterThan(tMacro);
+    expect(tMicro).toBeGreaterThan(0.9);
+
+    // 2. 冷却固化時の自己組織化結晶配向ロック
+    core.step(repo.entities, repo.materials, repo.externalSources, 1 / 60);
+    expect(crystalSeed.crystalOrientation).toBeDefined();
+    expect(
+      Math.abs(crystalSeed.crystalOrientation![0]) + Math.abs(crystalSeed.crystalOrientation![1]),
+    ).toBeGreaterThan(0.5);
   });
 });

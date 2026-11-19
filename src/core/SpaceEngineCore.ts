@@ -1,8 +1,10 @@
 import { BoundaryProjector } from './BoundaryProjector';
 import { ContactSolver } from './ContactSolver';
+import { CpuTypedArrayBackend } from './CpuTypedArrayBackend';
 import { DualPacketizer } from './DualPacketizer';
-import { FieldSolver } from './FieldSolver';
-import { MediumFluxSolver } from './MediumFluxSolver';
+import type { FieldSolver } from './FieldSolver';
+import type { ISpatialComputeBackend } from './ISpatialComputeBackend';
+import type { MediumFluxSolver } from './MediumFluxSolver';
 import { PerceptualScaler } from './PerceptualScaler';
 import { PhaseTransitionSolver } from './PhaseTransitionSolver';
 import { SpacePacketGrid } from './SpacePacketGrid';
@@ -18,24 +20,24 @@ import type {
 
 /**
  * 空間演算エンジンコア（SpaceEngineCore）
- * プラットフォーム非依存のファサードとして、1フレーム分の全演算ステップを統括する。
+ * プラットフォーム非依存のファサードとして、ISpatialComputeBackend 経由で1フレーム分の全演算ステップを統括する。
  * @see DATA_FLOW.md §3.1
  */
 export class SpaceEngineCore {
   public readonly grid: SpacePacketGrid;
   public config: SpaceCoreConfig;
 
+  private readonly backend: ISpatialComputeBackend;
   private readonly perceptualScaler = new PerceptualScaler();
   private readonly dualPacketizer = new DualPacketizer();
   private readonly boundaryProjector = new BoundaryProjector();
-  private readonly fieldSolver = new FieldSolver();
-  private readonly mediumSolver = new MediumFluxSolver();
   private readonly contactSolver = new ContactSolver();
   private readonly phaseSolver = new PhaseTransitionSolver();
   private absorbedBackgroundEnergy = 0;
 
-  constructor(config: SpaceCoreConfig) {
+  constructor(config: SpaceCoreConfig, backend: ISpatialComputeBackend = new CpuTypedArrayBackend()) {
     this.config = config;
+    this.backend = backend;
     this.grid = new SpacePacketGrid(
       config.nx,
       config.ny,
@@ -51,16 +53,30 @@ export class SpaceEngineCore {
   public resetField(): void {
     this.grid.reset();
     this.dualPacketizer.reset();
-    this.mediumSolver.reset();
+    this.backend.reset();
     this.absorbedBackgroundEnergy = 0;
   }
 
+  public getBackend(): ISpatialComputeBackend {
+    return this.backend;
+  }
+
   public getMediumSolver(): MediumFluxSolver {
-    return this.mediumSolver;
+    if (this.backend instanceof CpuTypedArrayBackend) {
+      return this.backend.mediumSolver;
+    }
+    throw new Error('Current backend does not expose CpuTypedArrayBackend mediumSolver');
   }
 
   public getFieldSolver(): FieldSolver {
-    return this.fieldSolver;
+    if (this.backend instanceof CpuTypedArrayBackend) {
+      return this.backend.fieldSolver;
+    }
+    throw new Error('Current backend does not expose CpuTypedArrayBackend fieldSolver');
+  }
+
+  public getPhaseSolver(): PhaseTransitionSolver {
+    return this.phaseSolver;
   }
 
   /**
@@ -113,11 +129,8 @@ export class SpaceEngineCore {
     // 2. 境界シェル射影（Projected 領域からの重力・遠方ポテンシャル焼き付け）
     const backgroundField = this.boundaryProjector.project(this.grid, combinedExternalSources);
 
-    // 3. 空間場更新（真空チャネル + 媒質チャネル）
-    if (medium) {
-      this.mediumSolver.syncMediumBaseline(this.grid, medium);
-    }
-    const metrics = this.fieldSolver.solve(
+    // 3. 空間場更新（ISpatialComputeBackend 経由で真空チャネル + 媒質チャネルを実行）
+    const metrics = this.backend.executeFieldAndMediumStep(
       this.grid,
       activeEntities,
       materials,
@@ -127,9 +140,6 @@ export class SpaceEngineCore {
       medium,
     );
     const effectiveFrameDt = Math.min(Math.max(rawDt, 1e-5), 0.05);
-    if (medium) {
-      this.mediumSolver.solve(this.grid, backgroundField, effectiveFrameDt);
-    }
 
     // 4. 不可侵バリア・定在波の檻摩擦・電池連結グループ回路解決
     const circuitCurrent = this.contactSolver.solve(

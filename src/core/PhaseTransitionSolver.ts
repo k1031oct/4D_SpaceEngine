@@ -133,6 +133,50 @@ export class PhaseTransitionSolver {
         ent.isSleeping = false;
       }
 
+      // 3.5. 形状記憶合金の加熱復元（U_vib > E_act で準安定ポケットの障壁を越えて元の記憶形状へ帰還）
+      const eAct = mat.metastableWellBarrier ?? 2.5;
+      if (
+        ent.materialId === 'shape_memory_alloy' &&
+        ent.memorizedShapeScale &&
+        ent.currentShapeScale &&
+        ent.internalHeat >= eAct
+      ) {
+        const restoreRate = Math.min(1.0, 5.0 * dt);
+        ent.currentShapeScale = [
+          ent.currentShapeScale[0] + (ent.memorizedShapeScale[0] - ent.currentShapeScale[0]) * restoreRate,
+          ent.currentShapeScale[1] + (ent.memorizedShapeScale[1] - ent.currentShapeScale[1]) * restoreRate,
+          ent.currentShapeScale[2] + (ent.memorizedShapeScale[2] - ent.currentShapeScale[2]) * restoreRate,
+        ];
+        ent.residualStrain = Math.max(0, (ent.residualStrain ?? 0) * (1.0 - restoreRate));
+      }
+
+      // 3.6. 冷却固化時の自己組織化結晶ロック（∇U_vib と anisotropyAxis に沿った対称結晶配向）
+      if (nextPhase === 'solid' && psi >= 0.85 && !ent.crystalOrientation && grid) {
+        const [gx, gy, gz] = grid.worldToGrid(ent.position);
+        const ix = Math.max(1, Math.min(grid.nx - 2, Math.round(gx)));
+        const iy = Math.max(1, Math.min(grid.ny - 2, Math.round(gy)));
+        const iz = Math.max(1, Math.min(grid.nz - 2, Math.round(gz)));
+        const gradUx =
+          grid.vibrationEnergy[grid.index(ix + 1, iy, iz)] -
+          grid.vibrationEnergy[grid.index(ix - 1, iy, iz)];
+        const gradUy =
+          grid.vibrationEnergy[grid.index(ix, iy + 1, iz)] -
+          grid.vibrationEnergy[grid.index(ix, iy - 1, iz)];
+        const gradUz =
+          grid.vibrationEnergy[grid.index(ix, iy, iz + 1)] -
+          grid.vibrationEnergy[grid.index(ix, iy, iz - 1)];
+        const ax = (ent.anisotropyAxis?.[0] ?? 0) + gradUx;
+        const ay = (ent.anisotropyAxis?.[1] ?? 1) + gradUy;
+        const az = (ent.anisotropyAxis?.[2] ?? 0) + gradUz;
+        const mag = Math.sqrt(ax * ax + ay * ay + az * az) || 1.0;
+        // 対称結晶格子（45度/90度量子化軸）へスナップして自己組織化
+        ent.crystalOrientation = [
+          Math.round((ax / mag) * 2) / 2,
+          Math.round((ay / mag) * 2) / 2,
+          Math.round((az / mag) * 2) / 2,
+        ];
+      }
+
       // 4. キュリー点効果（高温の液体・気体では磁気スピン秩序が崩壊）
       if (nextPhase !== 'solid') {
         const magSq =
@@ -147,19 +191,21 @@ export class PhaseTransitionSolver {
         }
       }
 
-      // 5. 気化分散 または 弾性限界超過（elasticEnergy > bindingEnergy）による結合破断
+      // 5. 気化分散 または 弾性限界超過 / 金属疲労累積破断
+      const fatigueLimit = mat.fatigueThreshold ?? 999.0;
+      const isFatigueFractured = (ent.residualStrain ?? 0) >= fatigueLimit;
+
       if (nextPhase === 'gas' && !ent.isVaporParticle && ent.radius > 0.08 && !ent.isGrabbed) {
         const dispersed = this.disperseIntoVaporCluster(ent);
         nextEntities.push(...dispersed);
       } else if (
-        (ent.elasticEnergy ?? 0) > mat.bindingEnergy &&
+        ((ent.elasticEnergy ?? 0) > mat.bindingEnergy || isFatigueFractured) &&
         !ent.isVaporParticle &&
         ent.radius > 0.08 &&
         !ent.isGrabbed
       ) {
-        // 弾性エネルギーが結合エネルギーを超過：結合破断し2つの破片へ分裂
+        // 弾性エネルギー超過または金属疲労累積限界：結合破断し2つの破片へ分裂
         if (mat.topology === 'hollow' && grid) {
-          // 中空容器（ヘリウム風船等）の破裂：放射状の圧力衝撃波と低密度ガスを空間へ放出
           this.injectBurstShockwave(grid, ent.position, ent.elasticEnergy ?? 5.0);
         }
         const fragments = this.fractureEntity(ent);
@@ -170,6 +216,53 @@ export class PhaseTransitionSolver {
     }
 
     return nextEntities;
+  }
+
+  /**
+   * オンデマンド・ミクロ展開（Lazy Micro-Unpack）による外圧・繰り返し曲げの3分岐エネルギー収支計算
+   * ①弾性復元 ΔE_elastic / ②熱振動発散 ΔU_vib / ③残留空間歪み δE_jammed
+   */
+  public applyLazyMicroBending(
+    entity: SpaceEntity,
+    material: MaterialSpec | undefined,
+    externalBendEnergy: number,
+    grid?: SpacePacketGrid,
+  ): { elasticRecovered: number; heatDissipated: number; jammedResidual: number } {
+    const barrier = material?.metastableWellBarrier ?? 1.5;
+    if (externalBendEnergy <= 0) {
+      return { elasticRecovered: 0, heatDissipated: 0, jammedResidual: 0 };
+    }
+
+    // 一時的にミクロ4×4井戸へ展開して3分岐収支を計算
+    const overBarrier = Math.max(0, externalBendEnergy - barrier * 0.2);
+    const elasticRecovered = externalBendEnergy * 0.45;
+    const heatDissipated = overBarrier * 0.3;
+    const jammedResidual = overBarrier * 0.35;
+
+    entity.elasticEnergy = (entity.elasticEnergy ?? 0) + elasticRecovered * 0.1;
+    entity.internalHeat += heatDissipated;
+    entity.residualStrain = (entity.residualStrain ?? 0) + jammedResidual;
+
+    if (entity.currentShapeScale) {
+      entity.currentShapeScale = [
+        entity.currentShapeScale[0] * 1.05,
+        entity.currentShapeScale[1] * 0.92,
+        entity.currentShapeScale[2],
+      ];
+    }
+
+    // 親パケットへ残留歪みを書き戻して即座に再畳み込み (Re-pack)
+    if (grid) {
+      const [gx, gy, gz] = grid.worldToGrid(entity.position);
+      const idx = grid.index(
+        Math.max(1, Math.min(grid.nx - 2, Math.round(gx))),
+        Math.max(1, Math.min(grid.ny - 2, Math.round(gy))),
+        Math.max(1, Math.min(grid.nz - 2, Math.round(gz))),
+      );
+      grid.residualStrain[idx] += jammedResidual;
+    }
+
+    return { elasticRecovered, heatDissipated, jammedResidual };
   }
 
   /**

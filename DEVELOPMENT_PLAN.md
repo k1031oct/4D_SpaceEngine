@@ -53,12 +53,10 @@
   * [x] カスタムマテリアル・天体スポナー（`SandboxViewModel.spawnCustomEntity`）
   * [x] Windows ローカルパッケージ化（`base: './'` 相対パスビルド対応） / Android タッチ対応（`touch-action: none`）
 
-### Phase 5〜7：統合空間演算アーキテクチャへの刷新
+### Phase 5〜8：統合空間演算アーキテクチャ v2.0（ISpatialComputeBackend・多安定井戸・量子トンネル）
 * **実装タスク：**
   * [x] Task 1: `DATA_FLOW.md` / `DEVELOPMENT_PLAN.md` / `4d_scale_space_engine.md` の同期更新
-  * [x] Task 2: `types.ts`, `SpacePacketGrid.ts`, `MaterialCatalog.ts` の刷新（動的媒質場・サブグリッド偏差・秩序度 $\Psi$・電荷格子パラメータ）
-  * [x] Task 3: 2大チャネル統合（`FieldSolver.ts` 真空チャネル＋光・ヒステリシス・BH創発、`MediumFluxSolver.ts` 動的気体媒質場）
-  * [x] Task 4: `ContactSolver.ts`（定在波の檻・不可侵バリア・電池回路）、`PhaseTransitionSolver.ts`（連続秩序度 $\Psi$）、`DualPacketizer.ts`（サブグリッド偏差＆臨界アップスケールトリガー）
-  * [x] Task 5: 気体・熱インジェクターブラシ & 新規4プリセット（電池回路・ヘリウム風船破裂・温冷対流・ブラックホール創発）
-* **完了条件（`tests/phase6_7_unified_physics.spec.ts`）：**
-  * 定在波の檻摩擦、電池回路駆動、粗視化偏差トルク＆ホットスポット破壊、動的気体対流＆真空断熱、ヘリウム風船浮上破裂、中空透過浸透、光相互作用、着磁ヒステリシス、冷間圧接＆ブラックホール自己捕獲の9項目全パス。
+  * [x] Task 2: `ISpatialComputeBackend` & `CpuTypedArrayBackend` 導入、残留歪み履歴 `residualStrain`・空白ポケットパラメータ統合
+  * [x] Task 3: 極小スケール量子トンネル波動染み出し・強誘電/強磁性ヒステリシス統合
+  * [x] Task 4: Lazy Micro-Unpack（金属疲労破断・形状記憶合金復元）および自己組織化結晶ロック実装
+  * [x] Task 5: 金属疲労・形状記憶合金プリセット追加 & `tests/phase6_8_unified_physics.spec.ts`（11項目）全パス

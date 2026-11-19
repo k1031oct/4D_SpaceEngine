@@ -140,6 +140,21 @@ export class FieldSolver {
   }
 
   /**
+   * 極小スケール（log10 L << 0）での波動染み出し（量子トンネル効果）透過率を算出する
+   */
+  public evaluateQuantumTunneling(
+    barrierHeight: number,
+    particleEnergy: number,
+    barrierWidth: number,
+    scaleL: number,
+  ): number {
+    if (particleEnergy >= barrierHeight) return 1.0;
+    const scaleFactor = Math.min(1.0, Math.max(1e-6, scaleL * 1e4));
+    const kappa = Math.sqrt(Math.max(0, barrierHeight - particleEnergy)) * scaleFactor;
+    return Math.exp(-2.0 * kappa * barrierWidth);
+  }
+
+  /**
    * エンティティの電荷・磁気モーメント・弾性率を空間パケットへ注入する
    */
   private injectSources(
@@ -324,7 +339,13 @@ export class FieldSolver {
 
           const newPhi =
             (phiC + (diffFactor / stiff) * lapPhi + grid.sourcePhi[idx] * dt) * phiDecay;
-          grid.phiNext[idx] = newPhi;
+          // 極小スケール (cellSize <= 1e-3) では障壁を越える量子トンネル染み出し成分を追加
+          const tunnelLeak =
+            grid.cellSize <= 1e-3
+              ? 0.02 *
+                (grid.phi[idxXm] + grid.phi[idxXp] + grid.phi[idxYm] + grid.phi[idxYp] - 4 * phiC)
+              : 0;
+          grid.phiNext[idx] = newPhi + tunnelLeak;
 
           // 気圧勾配 ∇Φ による運動量フロー駆動
           const gradPhiX = (grid.phi[idxXp] - grid.phi[idxXm]) * (0.5 * invDx);
@@ -496,19 +517,34 @@ export class FieldSolver {
         az += (ent.velocity[0] * wy - ent.velocity[1] * wx) * lorentzFactor;
       }
 
-      // 2. 誘電分極による静電誘導引力 F_pol = α_eff * k_pol * ∇|∇Φ|²
-      // 素粒子密度の低下（気化等）に応じて単位体積あたりの分極応答もスケーリングする
+      // 2. 誘電分極による静電誘導引力 + 強誘電ヒステリシス（エレクトレット化 & 加熱消極）
       const basePol = mat?.polarizability ?? 0;
       const effDensity = PhaseTransitionSolver.getEffectiveDensity(ent, mat);
       const densityRatio = effDensity / Math.max(mat?.density ?? 1.0, 1e-4);
       const pol = basePol * Math.min(1.0, Math.sqrt(Math.max(0, densityRatio)));
+      const psiPol = ent.orderParameter ?? PhaseTransitionSolver.getEffectiveBondRatio(ent, mat);
+      const coercivePol = mat?.coerciveBarrier ?? 0.4;
       if (pol > 0.01) {
         const gradPhiCenter = this.sampleSymmetricGradPhi(grid, ent.position);
-        ent.dipoleMoment = [
-          -pol * gradPhiCenter[0],
-          -pol * gradPhiCenter[1],
-          -pol * gradPhiCenter[2],
-        ];
+        const eMag = Math.sqrt(
+          gradPhiCenter[0] * gradPhiCenter[0] +
+            gradPhiCenter[1] * gradPhiCenter[1] +
+            gradPhiCenter[2] * gradPhiCenter[2],
+        );
+        if (psiPol < 0.35) {
+          ent.dipoleMoment = [
+            ent.dipoleMoment[0] * 0.85,
+            ent.dipoleMoment[1] * 0.85,
+            ent.dipoleMoment[2] * 0.85,
+          ];
+        } else if (eMag > coercivePol) {
+          // 強誘電ヒステリシスによる永久分極ロック
+          ent.dipoleMoment = [
+            -pol * gradPhiCenter[0],
+            -pol * gradPhiCenter[1],
+            -pol * gradPhiCenter[2],
+          ];
+        }
         const gradE2 = this.sampleSymmetricGradPhiSq(grid, ent.position);
         const polFactor = pol * config.polarizationCoupling * invMass;
         ax += gradE2[0] * polFactor;

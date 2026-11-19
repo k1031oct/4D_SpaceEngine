@@ -17,6 +17,7 @@
   │  購読用イミュータブル状態: SandboxUiState
   ├─▶ [SpaceStateRepository] (空間パケット状態・実体リスト・マテリアル辞書)
   └─▶ [SpaceEngineCore] (Pure TypeScript / プラットフォーム非依存)
+        ├─ ISpatialComputeBackend (CpuTypedArrayBackend: WebGPU/Wasm差し替え抽象化)
         ├─ PerceptualScaler  (第4軸: 知覚スケール L_base 算出)
         ├─ BoundaryProjector (視野外 Projected/Absorbed → 境界シェル射影)
         ├─ DualPacketizer    (空間パケット同期 Pack/Unpack & 多重極展開)
@@ -51,6 +52,7 @@
 | `reactivityPotential` | `Float32Array` | 酸化反応ポテンシャル $U_{\text{ox}}$ | 移流保存 |
 | `deviationVariance` | `Float32Array` | サブグリッド2次モーメント分散 $\sigma_E^2$ | 分散合成則 |
 | `peakDeviation` | `Float32Array` | サブグリッド最大局所ピーク $\delta E_{\max}$ | $\max$ 保存 |
+| `residualStrain` | `Float32Array` | 多安定ポテンシャル井戸の残留空間歪み $\Delta P_{\text{residual}}$ | 総和保存 |
 | `anisotropyAxis` | `Float32Array (x3)` | 1次・2次異方性軸ベクトル | 体積加重 |
 | `isCriticalSubgrid` | `Uint8Array` | $\bar{E} + \delta E_{\max} \ge E_{\text{barrier}}$ 臨界フラグ | — |
 | `orderParameter` | `Float32Array` | 結合維持率（秩序度）$\Psi \in [0, 1]$ | 加重平均 |

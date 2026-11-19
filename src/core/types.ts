@@ -46,7 +46,8 @@ export type PresetId =
   | 'battery_circuit'
   | 'helium_balloon_burst'
   | 'thermal_convection'
-  | 'black_hole_horizon';
+  | 'black_hole_horizon'
+  | 'fatigue_and_shape_memory';
 
 /**
  * 空間を満たす背景媒質（真空・気体・液体）の物性定義
@@ -110,6 +111,10 @@ export interface MaterialSpec {
   readonly resonantFrequency?: number;
   /** 保磁力障壁（強磁性・強誘電ヒステリシス閾値） */
   readonly coerciveBarrier?: number;
+  /** 多安定ポテンシャル井戸障壁 E_act（形状記憶・疲労転移用） */
+  readonly metastableWellBarrier?: number;
+  /** 疲労破断限界（残留歪み累積閾値） */
+  readonly fatigueThreshold?: number;
   /** 構造トポロジー */
   readonly topology?: MaterialTopology;
   /** 中空・外殻厚み比 */
@@ -169,6 +174,14 @@ export interface SpaceEntity {
   deviationVariance?: number;
   /** サブグリッド最大局所ピーク δE_max */
   peakDeviation?: number;
+  /** 多安定ポテンシャル井戸の残留空間歪み履歴 ΔP_residual */
+  residualStrain?: number;
+  /** 記憶された安定形状スケール（形状記憶合金用） */
+  memorizedShapeScale?: Vec3;
+  /** 現在の変形形状スケール */
+  currentShapeScale?: Vec3;
+  /** 自己組織化結晶配向ベクトル */
+  crystalOrientation?: Vec3;
   /** 1次・2次異方性軸ベクトル */
   anisotropyAxis?: Vec3;
   /** 臨界アップスケールトリガーフラグ */

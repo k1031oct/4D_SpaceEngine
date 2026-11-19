@@ -65,9 +65,10 @@ export class SpacePacketGrid {
   public mediumConcentrationNext: Float32Array;
   public reactivityPotential: Float32Array;
 
-  /** Phase 6-7: サブグリッド偏差モーメント (σ_E², δE_max, 異方性軸, 臨界フラグ) */
+  /** Phase 6-7: サブグリッド偏差モーメント (σ_E², δE_max, ΔP_residual, 異方性軸, 臨界フラグ) */
   public deviationVariance: Float32Array;
   public peakDeviation: Float32Array;
+  public residualStrain: Float32Array;
   public anisotropyX: Float32Array;
   public anisotropyY: Float32Array;
   public anisotropyZ: Float32Array;
@@ -135,6 +136,7 @@ export class SpacePacketGrid {
 
     this.deviationVariance = new Float32Array(this.count);
     this.peakDeviation = new Float32Array(this.count);
+    this.residualStrain = new Float32Array(this.count);
     this.anisotropyX = new Float32Array(this.count);
     this.anisotropyY = new Float32Array(this.count);
     this.anisotropyZ = new Float32Array(this.count);
@@ -200,6 +202,7 @@ export class SpacePacketGrid {
     this.reactivityPotential.fill(0);
     this.deviationVariance.fill(0);
     this.peakDeviation.fill(0);
+    this.residualStrain.fill(0);
     this.anisotropyX.fill(0);
     this.anisotropyY.fill(0);
     this.anisotropyZ.fill(0);

@@ -199,6 +199,22 @@ export class SpaceStateRepository {
         },
         this.createEntity('orbit_probe', 'iron_ball', [1.1, 1.5, 0], 0.14, 0.5, 0, 'sphere', [0.28, 0.28, 0.28]),
       ];
+    } else if (presetId === 'fatigue_and_shape_memory') {
+      // ⑤ 針金の金属疲労破断と形状記憶合金の加熱復元
+      this.externalSources = [{ id: 'g', uniformField: [0, -9.8, 0] }];
+      this.currentMediumId = 'air';
+      this.entities = [
+        {
+          ...this.createEntity('fatigue_wire', 'metal_wire', [-0.4, 0.15, 0], 0.14, 0.6, 0, 'cylinder', [0.08, 0.3, 0.08]),
+          residualStrain: 0,
+        },
+        {
+          ...this.createEntity('sma_spring', 'shape_memory_alloy', [0.4, 0.15, 0], 0.14, 0.6, 0, 'box', [0.24, 0.16, 0.16]),
+          memorizedShapeScale: [1, 1, 1],
+          currentShapeScale: [1.4, 0.65, 1], // 低温の準安定ポケットで変形ロックされた状態
+          residualStrain: 0.8,
+        },
+      ];
     }
   }
 
