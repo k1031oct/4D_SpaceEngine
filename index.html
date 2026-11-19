@@ -150,6 +150,7 @@
         <div class="metric-row"><span class="metric-label">ε-Cutoff 省略率</span><span id="m-sleep" class="metric-val">0.0%</span></div>
         <div class="metric-row"><span class="metric-label">実効 Δt (CFL)</span><span id="m-dt" class="metric-val">0.000s</span></div>
         <div class="metric-row"><span class="metric-label">空中放電 (プラズマ)</span><span id="m-discharge" class="metric-val">0</span></div>
+        <div class="metric-row"><span class="metric-label">回路電流 I / 事象地平</span><span id="m-circuit-bh" class="metric-val">0.00 / 0</span></div>
         <div class="metric-row"><span class="metric-label">総エネルギー</span><span id="m-energy" class="metric-val">0.000</span></div>
         <div class="metric-row"><span class="metric-label">選択オブジェクト</span><span id="m-selected" class="metric-val">なし</span></div>
         <div class="controls">
@@ -165,6 +166,10 @@
             <option value="tribo_induction">4. 摩擦帯電・静電誘導・アース</option>
             <option value="magnet_attraction">5. ネオジム磁石・鉄球吸着</option>
             <option value="multi_scale_solar">6. 4Dマルチスケール（机上↔宇宙）</option>
+            <option value="battery_circuit">7. 電池と導線・電球回路</option>
+            <option value="helium_balloon_burst">8. ヘリウム風船の浮上と破裂拡散</option>
+            <option value="thermal_convection">9. 温冷空気の対流混合</option>
+            <option value="black_hole_horizon">10. 光焦点ブラックホール創発</option>
           </select>
           <select id="sel-medium">
             <option value="air">空間媒質: 標準大気 (Air)</option>
@@ -225,6 +230,24 @@
           </label>
         </div>
         <button id="btn-spawn" class="primary" style="width: 100%; margin-top: 8px;">空間へスポーン</button>
+
+        <h2>気体・熱インジェクターブラシ</h2>
+        <div class="spawn-grid">
+          <label>注入モード
+            <select id="inj-mode">
+              <option value="hot_air">温風 (上昇対流)</option>
+              <option value="cold_air">冷風 (下降気流)</option>
+              <option value="helium">ヘリウム注入</option>
+              <option value="oxygen">酸素注入</option>
+              <option value="vacuum">真空吸引</option>
+              <option value="light_pulse">高密度光パルス</option>
+            </select>
+          </label>
+          <label>注入強度
+            <input id="inj-strength" type="number" step="0.5" min="0.5" value="2.0" />
+          </label>
+        </div>
+        <button id="btn-inject" class="primary" style="width: 100%; margin-top: 8px;">空間中心へ注入</button>
       </div>
     </div>
     <script type="module" src="/src/main.ts"></script>

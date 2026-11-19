@@ -44,15 +44,17 @@ export class FieldSolver {
     // 2. Visible エンティティからのソース注入（電荷・磁気スピン・空間弾性 stiffness）
     this.injectSources(grid, entities, materials);
 
-    // 3. サブステップでの空間場更新（緩和・フロー・渦度・散逸）
+    // 3. サブステップでの空間場更新（緩和・フロー・渦度・散逸・非線形屈折率・事象の地平面）
     const permittivity = Math.max(0.1, medium?.permittivity ?? 1.0);
     let activeCount = 0;
     let sleepingCount = 0;
+    let eventHorizonCount = 0;
     for (let s = 0; s < substeps; s++) {
       const stats = this.stepGrid(grid, dtSub, config, scaledDiffusion, permittivity);
       if (s === substeps - 1) {
         activeCount = stats.activeCount;
         sleepingCount = stats.sleepingCount;
+        eventHorizonCount = stats.eventHorizonCount;
       }
     }
 
@@ -82,7 +84,59 @@ export class FieldSolver {
       totalEnergy,
       dtEffective: dtSub,
       activeDischargeCount,
+      eventHorizonCount,
     };
+  }
+
+  /**
+   * 光波とマテリアルの相互作用（透過・鏡面反射・共鳴吸収発熱）を固有共鳴周波数 ω_0 と自由電荷密度から算出する
+   */
+  public evaluateLightInteraction(
+    material: MaterialSpec | undefined,
+    lightFrequency: number,
+  ): { transmittance: number; reflectance: number; absorption: number } {
+    if (!material) return { transmittance: 1, reflectance: 0, absorption: 0 };
+    const w0 = material.resonantFrequency ?? 10.0;
+    const cond = material.conductivity;
+
+    // 1. 固有共鳴周波数近傍: 共鳴吸収（内部振動エネルギー U_vib へ変換）
+    const detuning = Math.abs(lightFrequency - w0) / Math.max(w0, 1e-4);
+    if (detuning < 0.22) {
+      const abs = 0.85 * (1.0 - detuning / 0.22);
+      return { transmittance: (1 - abs) * 0.3, reflectance: (1 - abs) * 0.7, absorption: abs };
+    }
+
+    // 2. 自由電子密度が高い導体でプラズマ周波数以下: 鏡面反射
+    if (cond > 0.65 && lightFrequency < w0 * 1.2) {
+      return { transmittance: 0.02, reflectance: 0.92, absorption: 0.06 };
+    }
+
+    // 3. 非共鳴の絶縁体（ガラス等）: インピーダンス連続性に応じた透過屈折
+    const nEff = Math.sqrt(Math.max(1.0, material.elasticity ?? 1.5));
+    const fresnelR = Math.pow((nEff - 1) / (nEff + 1), 2);
+    return {
+      transmittance: Math.max(0, 1.0 - fresnelR - 0.02),
+      reflectance: fresnelR,
+      absorption: 0.02,
+    };
+  }
+
+  /**
+   * 中空構造の空間インピーダンス透過とサイズ選別浸透を評価する（ハードコードなし）
+   */
+  public evaluateHollowTransmissionAndPermeation(
+    shellZ: number,
+    innerZ: number,
+    gapSpacing: number,
+    particleHardRadius: number,
+  ): { waveTransmittance: number; canPermeate: boolean } {
+    // 空間インピーダンス連続性による波動透過率 T = 4 Z1 Z2 / (Z1 + Z2)^2
+    const z1 = Math.max(0.01, shellZ);
+    const z2 = Math.max(0.01, innerZ);
+    const waveTransmittance = (4.0 * z1 * z2) / ((z1 + z2) * (z1 + z2));
+    // 連結すき間 d_gap と通過粒子の不可侵バリア半径 R_hard のサイズ比較
+    const canPermeate = gapSpacing > particleHardRadius * 2.0;
+    return { waveTransmittance, canPermeate };
   }
 
   /**
@@ -160,7 +214,7 @@ export class FieldSolver {
     config: SpaceCoreConfig,
     scaledDiffusion: number,
     permittivity: number,
-  ): { activeCount: number; sleepingCount: number } {
+  ): { activeCount: number; sleepingCount: number; eventHorizonCount: number } {
     const { nx, ny, nz } = grid;
     const invDx = 1.0 / grid.cellSize;
     const invDx2 = invDx * invDx;
@@ -172,6 +226,7 @@ export class FieldSolver {
 
     let activeCount = 0;
     let sleepingCount = 0;
+    let eventHorizonCount = 0;
 
     for (let z = 0; z < nz; z++) {
       for (let y = 0; y < ny; y++) {
@@ -223,7 +278,39 @@ export class FieldSolver {
           activeCount++;
 
           const phiC = grid.phi[idx];
-          const stiff = Math.max(0.1, grid.stiffness[idx] * permittivity);
+          const baseStiff = Math.max(0.1, grid.stiffness[idx] * permittivity);
+
+          // 非線形屈折率 ε_eff と事象の地平面（ブラックホール自己捕獲）判定
+          const cellEnergy =
+            0.5 *
+              (phiC * phiC +
+                grid.px[idx] * grid.px[idx] +
+                grid.py[idx] * grid.py[idx] +
+                grid.pz[idx] * grid.pz[idx]) +
+            grid.vibrationEnergy[idx];
+          const stiff = baseStiff + 0.35 * cellEnergy;
+          if (stiff >= 14.0 || cellEnergy >= 35.0) {
+            grid.isEventHorizon[idx] = 1;
+            eventHorizonCount++;
+            // 事象の地平面内部：外向き拡散・脱出を遮断し、負の深い重力井戸を維持して周囲を捕獲
+            const neighborSum =
+              grid.phi[idxXm] +
+              grid.phi[idxXp] +
+              grid.phi[idxYm] +
+              grid.phi[idxYp] +
+              grid.phi[idxZm] +
+              grid.phi[idxZp];
+            grid.phiNext[idx] = phiC + (neighborSum * 0.05 + grid.sourcePhi[idx]) * dt;
+            grid.pxNext[idx] = grid.px[idx] * 0.5;
+            grid.pyNext[idx] = grid.py[idx] * 0.5;
+            grid.pzNext[idx] = grid.pz[idx] * 0.5;
+            grid.wxNext[idx] = grid.wx[idx];
+            grid.wyNext[idx] = grid.wy[idx];
+            grid.wzNext[idx] = grid.wz[idx];
+            grid.isSleeping[idx] = 0;
+            continue;
+          }
+          grid.isEventHorizon[idx] = 0;
 
           // ポアソン緩和（ラプラシアンによる歪みの均質化）
           const lapPhi =
@@ -318,7 +405,7 @@ export class FieldSolver {
     [grid.wy, grid.wyNext] = [grid.wyNext, grid.wy];
     [grid.wz, grid.wzNext] = [grid.wzNext, grid.wz];
 
-    return { activeCount, sleepingCount };
+    return { activeCount, sleepingCount, eventHorizonCount };
   }
 
   /**
@@ -360,7 +447,15 @@ export class FieldSolver {
 
       // 空間媒質によるアルキメデスの浮力と空間フロー P との相対速度に基づく流体抗力
       if (medium && (medium.density > 0 || medium.viscosity > 0)) {
-        const objDensity = Math.max(PhaseTransitionSolver.getEffectiveDensity(ent, mat), 1e-4);
+        let objDensity = Math.max(PhaseTransitionSolver.getEffectiveDensity(ent, mat), 1e-4);
+        // 中空構造（ヘリウム風船等）で実質量が軽い場合は体積比密度を優先し、ヘリウム浮力を創発
+        if (mat?.topology === 'hollow' && ent.phaseState !== 'gas') {
+          const vol = (4.0 / 3.0) * Math.PI * ent.radius * ent.radius * ent.radius;
+          const apparentDensity = ent.mass / Math.max(vol, 1e-5);
+          if (apparentDensity < objDensity) {
+            objDensity = Math.max(apparentDensity, 1e-4);
+          }
+        }
         const buoyRatio = medium.density / objDensity;
         ax -= backgroundField[0] * buoyRatio;
         ay -= backgroundField[1] * buoyRatio;
@@ -421,7 +516,31 @@ export class FieldSolver {
         az += gradE2[2] * polFactor;
       }
 
-      // 3. 磁気力と磁気双極子トルク
+      // 3. 磁気力と磁気双極子トルク + 強磁性ヒステリシス（着磁・加熱消磁）
+      const wxField = grid.sampleField(grid.wx, ent.position);
+      const wyField = grid.sampleField(grid.wy, ent.position);
+      const wzField = grid.sampleField(grid.wz, ent.position);
+      const extWMag = Math.sqrt(wxField * wxField + wyField * wyField + wzField * wzField);
+      const coercive = mat?.coerciveBarrier ?? 0.3;
+      const psi = ent.orderParameter ?? PhaseTransitionSolver.getEffectiveBondRatio(ent, mat);
+
+      if ((mat?.magneticSusceptibility ?? 0) > 0.5 && (mat?.spinMagnitude ?? 0) === 0 && !ent.isSleeping) {
+        if (psi < 0.35) {
+          // 高温（秩序度 Ψ 低下）による熱消磁
+          const demag = Math.max(0, 1.0 - 3.0 * dt);
+          ent.magneticMoment[0] *= demag;
+          ent.magneticMoment[1] *= demag;
+          ent.magneticMoment[2] *= demag;
+        } else if (extWMag > coercive * 1.5) {
+          // 外部渦度が保磁力障壁を超えた：強磁性ヒステリシスによる着磁（永久磁石化）
+          const alignRate = Math.min(1.0, 4.0 * dt);
+          const targetMag = (mat?.magneticSusceptibility ?? 1.0) * 6.0;
+          ent.magneticMoment[0] += ((wxField / extWMag) * targetMag - ent.magneticMoment[0]) * alignRate;
+          ent.magneticMoment[1] += ((wyField / extWMag) * targetMag - ent.magneticMoment[1]) * alignRate;
+          ent.magneticMoment[2] += ((wzField / extWMag) * targetMag - ent.magneticMoment[2]) * alignRate;
+        }
+      }
+
       const magMomentSq =
         ent.magneticMoment[0] * ent.magneticMoment[0] +
         ent.magneticMoment[1] * ent.magneticMoment[1] +
@@ -483,18 +602,19 @@ export class FieldSolver {
         az += gradW2[2] * magFactor;
       }
 
-      // 4. 計算窓内の全 Visible オブジェクトによる統一万有引力（質量＝素粒子密度の積分）
+      // 4. 計算窓内の全 Visible オブジェクトによる統一万有引力（質量＝素粒子密度の積分）＋事象の地平面捕獲引力
       for (const other of entities) {
         if (other === ent || other.domainClass !== 'Visible') continue;
         const gravStrength = other.gravityStrength ?? other.mass * config.gravitationalConstant;
-        if (gravStrength <= 1e-4) continue;
+        if (gravStrength <= 1e-4 && !other.isBlackHole) continue;
         const dx = other.position[0] - ent.position[0];
         const dy = other.position[1] - ent.position[1];
         const dz = other.position[2] - ent.position[2];
         const minR = Math.max(other.radius + ent.radius, grid.cellSize * 0.5);
         const r2 = Math.max(dx * dx + dy * dy + dz * dz, minR * minR);
         const r = Math.sqrt(r2);
-        const gAcc = gravStrength / r2;
+        const bhBoost = other.isBlackHole ? 25.0 : 0.0;
+        const gAcc = (gravStrength + bhBoost) / r2;
         ax += (dx / r) * gAcc;
         ay += (dy / r) * gAcc;
         az += (dz / r) * gAcc;
@@ -520,7 +640,7 @@ export class FieldSolver {
         const normalAccel = Math.max(0, -backgroundField[1]);
         // 磁石同士/鉄球の吸着後に定常的な自己/接触勾配で再起床しないよう十分な余裕閾値を設ける
         const isMagnetic = magMomentSq > 1e-5 || chiMag > 0.01;
-        const margin = isMagnetic ? 6.0 : 0.8;
+        const margin = isMagnetic ? 3.5 : 0.8;
         const horizontalOvercomesFriction = netHorizontalAccel > muS * normalAccel + margin;
 
         if (

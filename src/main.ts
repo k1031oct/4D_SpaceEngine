@@ -1,4 +1,4 @@
-import type { DebugOverlayMode, MediumId, PresetId } from './core/types';
+import type { DebugOverlayMode, InjectorBrushMode, MediumId, PresetId } from './core/types';
 import { ThreeViewAdapter } from './view/ThreeViewAdapter';
 import type { SandboxUiState } from './viewmodel/SandboxUiState';
 import { SandboxViewModel } from './viewmodel/SandboxViewModel';
@@ -14,6 +14,7 @@ const elPackets = document.getElementById('m-packets')!;
 const elSleep = document.getElementById('m-sleep')!;
 const elDt = document.getElementById('m-dt')!;
 const elDischarge = document.getElementById('m-discharge')!;
+const elCircuitBh = document.getElementById('m-circuit-bh')!;
 const elEnergy = document.getElementById('m-energy')!;
 const elSelected = document.getElementById('m-selected')!;
 const lblScaleVal = document.getElementById('lbl-scale-val')!;
@@ -39,6 +40,9 @@ const spCharge = document.getElementById('sp-charge') as HTMLInputElement;
 const spRadius = document.getElementById('sp-radius') as HTMLInputElement;
 const spGrav = document.getElementById('sp-grav') as HTMLInputElement;
 const btnSpawn = document.getElementById('btn-spawn') as HTMLButtonElement;
+const injMode = document.getElementById('inj-mode') as HTMLSelectElement;
+const injStrength = document.getElementById('inj-strength') as HTMLInputElement;
+const btnInject = document.getElementById('btn-inject') as HTMLButtonElement;
 
 function updateHud(state: SandboxUiState): void {
   elScale.textContent = state.perceptualScaleLog10.toFixed(2);
@@ -47,6 +51,7 @@ function updateHud(state: SandboxUiState): void {
   elSleep.textContent = `${(state.sleepingPacketRatio * 100).toFixed(1)}%`;
   elDt.textContent = `${state.dtEffective.toFixed(4)}s`;
   elDischarge.textContent = `${state.activeDischargeCount}`;
+  elCircuitBh.textContent = `${state.circuitCurrent.toFixed(2)} / ${state.eventHorizonCount}`;
   elEnergy.textContent = state.totalEnergy.toFixed(3);
   btnToggle.textContent = state.isRunning ? '一時停止' : '再開';
   lblScaleVal.textContent =
@@ -96,6 +101,15 @@ btnSpawn.addEventListener('click', () => {
     radius: parseFloat(spRadius.value) || 0.2,
     gravityStrength: parseFloat(spGrav.value) || 0,
   });
+});
+btnInject.addEventListener('click', () => {
+  const c = viewModel.core.config.center;
+  viewModel.injectBrushAt(
+    [c[0], c[1] - 0.5, c[2]],
+    0.8,
+    injMode.value as InjectorBrushMode,
+    parseFloat(injStrength.value) || 2.0,
+  );
 });
 
 // メインループ

@@ -58,6 +58,27 @@ export class SpacePacketGrid {
   public readonly boundaryGradY: Float32Array;
   public readonly boundaryGradZ: Float32Array;
 
+  /** Phase 6-7: 動的気体媒質場 (ρ_med, C_med, U_ox) */
+  public mediumDensity: Float32Array;
+  public mediumDensityNext: Float32Array;
+  public mediumConcentration: Float32Array;
+  public mediumConcentrationNext: Float32Array;
+  public reactivityPotential: Float32Array;
+
+  /** Phase 6-7: サブグリッド偏差モーメント (σ_E², δE_max, 異方性軸, 臨界フラグ) */
+  public deviationVariance: Float32Array;
+  public peakDeviation: Float32Array;
+  public anisotropyX: Float32Array;
+  public anisotropyY: Float32Array;
+  public anisotropyZ: Float32Array;
+  public isCriticalSubgrid: Uint8Array;
+
+  /** Phase 6-7: 結合秩序度 Ψ ∈ [0, 1]、定在波の檻蓄積エネルギー、連結グループID、事象の地平面 */
+  public orderParameter: Float32Array;
+  public trapEnergyStored: Float32Array;
+  public groupId: Int32Array;
+  public isEventHorizon: Uint8Array;
+
   constructor(nx: number, ny: number, nz: number, cellSize: number, center: Vec3) {
     this.nx = nx;
     this.ny = ny;
@@ -106,6 +127,25 @@ export class SpacePacketGrid {
     this.boundaryGradY = new Float32Array(this.count);
     this.boundaryGradZ = new Float32Array(this.count);
 
+    this.mediumDensity = new Float32Array(this.count);
+    this.mediumDensityNext = new Float32Array(this.count);
+    this.mediumConcentration = new Float32Array(this.count);
+    this.mediumConcentrationNext = new Float32Array(this.count);
+    this.reactivityPotential = new Float32Array(this.count);
+
+    this.deviationVariance = new Float32Array(this.count);
+    this.peakDeviation = new Float32Array(this.count);
+    this.anisotropyX = new Float32Array(this.count);
+    this.anisotropyY = new Float32Array(this.count);
+    this.anisotropyZ = new Float32Array(this.count);
+    this.isCriticalSubgrid = new Uint8Array(this.count);
+
+    this.orderParameter = new Float32Array(this.count);
+    this.trapEnergyStored = new Float32Array(this.count);
+    this.groupId = new Int32Array(this.count);
+    this.groupId.fill(-1);
+    this.isEventHorizon = new Uint8Array(this.count);
+
     // 最外周6面を境界シェルとしてマーク
     for (let z = 0; z < nz; z++) {
       for (let y = 0; y < ny; y++) {
@@ -153,6 +193,21 @@ export class SpacePacketGrid {
     this.boundaryGradX.fill(0);
     this.boundaryGradY.fill(0);
     this.boundaryGradZ.fill(0);
+    this.mediumDensity.fill(0);
+    this.mediumDensityNext.fill(0);
+    this.mediumConcentration.fill(0);
+    this.mediumConcentrationNext.fill(0);
+    this.reactivityPotential.fill(0);
+    this.deviationVariance.fill(0);
+    this.peakDeviation.fill(0);
+    this.anisotropyX.fill(0);
+    this.anisotropyY.fill(0);
+    this.anisotropyZ.fill(0);
+    this.isCriticalSubgrid.fill(0);
+    this.orderParameter.fill(0);
+    this.trapEnergyStored.fill(0);
+    this.groupId.fill(-1);
+    this.isEventHorizon.fill(0);
   }
 
   /**

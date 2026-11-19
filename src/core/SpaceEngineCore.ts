@@ -2,6 +2,7 @@ import { BoundaryProjector } from './BoundaryProjector';
 import { ContactSolver } from './ContactSolver';
 import { DualPacketizer } from './DualPacketizer';
 import { FieldSolver } from './FieldSolver';
+import { MediumFluxSolver } from './MediumFluxSolver';
 import { PerceptualScaler } from './PerceptualScaler';
 import { PhaseTransitionSolver } from './PhaseTransitionSolver';
 import { SpacePacketGrid } from './SpacePacketGrid';
@@ -28,6 +29,7 @@ export class SpaceEngineCore {
   private readonly dualPacketizer = new DualPacketizer();
   private readonly boundaryProjector = new BoundaryProjector();
   private readonly fieldSolver = new FieldSolver();
+  private readonly mediumSolver = new MediumFluxSolver();
   private readonly contactSolver = new ContactSolver();
   private readonly phaseSolver = new PhaseTransitionSolver();
   private absorbedBackgroundEnergy = 0;
@@ -49,7 +51,16 @@ export class SpaceEngineCore {
   public resetField(): void {
     this.grid.reset();
     this.dualPacketizer.reset();
+    this.mediumSolver.reset();
     this.absorbedBackgroundEnergy = 0;
+  }
+
+  public getMediumSolver(): MediumFluxSolver {
+    return this.mediumSolver;
+  }
+
+  public getFieldSolver(): FieldSolver {
+    return this.fieldSolver;
   }
 
   /**
@@ -102,7 +113,10 @@ export class SpaceEngineCore {
     // 2. 境界シェル射影（Projected 領域からの重力・遠方ポテンシャル焼き付け）
     const backgroundField = this.boundaryProjector.project(this.grid, combinedExternalSources);
 
-    // 3. 空間場更新（ソース注入・ポアソン緩和・渦度・散逸・遠隔力積分・媒質効果）
+    // 3. 空間場更新（真空チャネル + 媒質チャネル）
+    if (medium) {
+      this.mediumSolver.syncMediumBaseline(this.grid, medium);
+    }
     const metrics = this.fieldSolver.solve(
       this.grid,
       activeEntities,
@@ -112,12 +126,20 @@ export class SpaceEngineCore {
       this.config,
       medium,
     );
-
-    // 4. サブグリッド接触・静止摩擦ロック解決
     const effectiveFrameDt = Math.min(Math.max(rawDt, 1e-5), 0.05);
-    this.contactSolver.solve(activeEntities, materials, effectiveFrameDt, this.config);
+    if (medium) {
+      this.mediumSolver.solve(this.grid, backgroundField, effectiveFrameDt);
+    }
 
-    // 5. 相転移（固体/液体/気体）・燃焼・気化集合体分散と環境熱緩和
+    // 4. 不可侵バリア・定在波の檻摩擦・電池連結グループ回路解決
+    const circuitCurrent = this.contactSolver.solve(
+      activeEntities,
+      materials,
+      effectiveFrameDt,
+      this.config,
+    );
+
+    // 5. 相転移（連続秩序度 Ψ ∈ [0, 1]）・燃焼・気化集合体分散と環境熱緩和
     activeEntities = this.phaseSolver.solve(
       activeEntities,
       materials,
@@ -129,6 +151,7 @@ export class SpaceEngineCore {
     return {
       metrics: {
         ...metrics,
+        circuitCurrent,
         totalEnergy: metrics.totalEnergy + this.absorbedBackgroundEnergy,
       },
       entities: activeEntities,

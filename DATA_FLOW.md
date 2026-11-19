@@ -20,8 +20,10 @@
         ├─ PerceptualScaler  (第4軸: 知覚スケール L_base 算出)
         ├─ BoundaryProjector (視野外 Projected/Absorbed → 境界シェル射影)
         ├─ DualPacketizer    (空間パケット同期 Pack/Unpack & 多重極展開)
-        ├─ FieldSolver       (空間場: ポアソン緩和・渦度・散逸・CFL制御)
-        └─ ContactSolver     (サブグリッド: めり込み解消・静止摩擦ロック・帯電)
+        ├─ FieldSolver       (真空チャネル: 光共鳴・非線形屈折率・ヒステリシス・気圧緩和)
+        ├─ MediumFluxSolver  (媒質チャネル: 動的気体媒質の対流・移流拡散・衝撃波・真空断熱)
+        ├─ PhaseTransitionSolver (秩序度 Ψ ∈ [0, 1] 連続相状態・燃焼・気化分散)
+        └─ ContactSolver     (不可侵バリア・定在波の檻摩擦・電池連結グループ回路)
 ```
 
 ---
@@ -44,6 +46,16 @@
 | `stiffness` | `number` | 有効弾性・誘電率 $\varepsilon_{\text{eff}}$ | 体積加重平均 |
 | `isBoundary` | `boolean` | 境界シェル（最外周6面）フラグ | — |
 | `isSleeping` | `boolean` | $\varepsilon$-Cutoff によるスリープ状態 | 外乱で解除 |
+| `mediumDensity` | `Float32Array` | 動的気体媒質密度 $\rho_{\text{med}}$ | 質量保存 |
+| `mediumConcentration` | `Float32Array` | 媒質濃度 $C_{\text{med}}$（`0`＝真空断熱） | 移流保存 |
+| `reactivityPotential` | `Float32Array` | 酸化反応ポテンシャル $U_{\text{ox}}$ | 移流保存 |
+| `deviationVariance` | `Float32Array` | サブグリッド2次モーメント分散 $\sigma_E^2$ | 分散合成則 |
+| `peakDeviation` | `Float32Array` | サブグリッド最大局所ピーク $\delta E_{\max}$ | $\max$ 保存 |
+| `anisotropyAxis` | `Float32Array (x3)` | 1次・2次異方性軸ベクトル | 体積加重 |
+| `isCriticalSubgrid` | `Uint8Array` | $\bar{E} + \delta E_{\max} \ge E_{\text{barrier}}$ 臨界フラグ | — |
+| `orderParameter` | `Float32Array` | 結合維持率（秩序度）$\Psi \in [0, 1]$ | 加重平均 |
+| `trapEnergyStored` | `Float32Array` | 定在波の檻の蓄積エネルギー | 総和保存 |
+| `groupId` | `Int32Array` | 連結グループ識別子（`-1`＝単独） | 継承 |
 
 ### 2.2 マテリアル物性（`MaterialSpec`）と実体オブジェクト（`SpaceEntity`）
 
@@ -131,10 +143,10 @@ SandboxUiState
 | **1. スケール決定** | `PerceptualScaler` | └─ カメラ位置・速度・近接最大オブジェクトから基準サイズ $L_{\text{base}}$ を算出<br>└─ 全 `SpaceEntity` を `Visible` / `Projected` / `Absorbed` に分類 |
 | **2. 境界・双対同期** | `BoundaryProjector`<br>`DualPacketizer` | └─ `Projected`（地球・太陽・遠方電源等）を境界シェル6面の $\vec{G}_{\text{boundary}}, \vec{B}_{\text{boundary}}$ へ射影<br>└─ 必要に応じ Octree を分割/統合し、内部の `Visible` オブジェクトを Pack/Unpack |
 | **3. ソース注入** | `FieldSolver` | └─ `Visible` エンティティの $q, \vec{m}, U$ を包含パケットのソース項 $S_{\Phi}, S_{\omega}$ へ加算 |
-| **4. 空間場更新** | `FieldSolver` | └─ CFL 条件からサブステップ回数 $N_{\text{sub}}$ と $\Delta t_{\text{sub}}$ を決定<br>└─ `isSleeping == false` のパケットに対し：<br>　├─ ポアソン圧力緩和（T字境界では面対称フラックスを適用）<br>　├─ 運動量フロー $\vec{P}$ と渦度 $\vec{\omega}$ の相互更新<br>　└─ 空間粘性による散逸（運動量の一部を $U_{\text{vib}}$ へ変換）<br>└─ $|\Delta \Phi| < \varepsilon$ かつ $|\vec{P}| < \varepsilon$ のパケットをスリープ化 |
-| **5. 場からの力取得** | `FieldSolver` | └─ 各 `Visible` エンティティ位置で $\nabla \Phi$（静電・重力）、$\nabla |\vec{\omega}|^2$（ケルビン磁力）、分極力をサンプリングし速度へ積分 |
-| **6. サブグリッド接触** | `ContactSolver` | └─ エンティティ同士・床面とのめり込み解消（Position-Based）<br>└─ 接触ペアに対し：<br>　├─ 摩擦帯電（相対滑り速度 $\times \Delta\text{electronAffinity}$ で電荷移動）<br>　├─ 導体分配・アース接地（`conductivity` に応じ $\Phi$ 均等化 / `isGrounded` で $q \to 0$）<br>　└─ **静止摩擦ロック**：$|v_{\text{rel}}| < v_{\text{sleep}}$ かつ接線力 $< \mu_s N$ なら速度を `0` に固定し `isSleeping = true` |
-| **6.5 相転移・熱緩和** | `PhaseTransitionSolver` | └─ `internalHeat` と `bindingEnergy` を比較し `solid` / `liquid` / `gas` を決定<br>└─ 相状態に応じて実効密度（気化時は極小密度 $\to$ 浮力で自動上昇）と流動性を更新し、環境温度 `ambientHeat` へ緩やかに放熱 |
+| **4. 空間場更新（2大チャネル）** | `FieldSolver`<br>`MediumFluxSolver` | └─ **真空チャネル（`FieldSolver`）**：CFL・拡散安定制御下での非線形屈折率 $\varepsilon_{\text{eff}}$ ポアソン緩和、光共鳴吸収、強磁性/強誘電ヒステリシス更新、事象の地平面自己捕獲判定<br>└─ **媒質チャネル（`MediumFluxSolver`）**：$C_{\text{med}} > 0$ のパケット間で浮力駆動対流・熱伝導・圧力衝撃波・ガス拡散を実行（$C_{\text{med}} = 0$ は自動断熱） |
+| **5. 場からの力取得** | `FieldSolver` | └─ 各 `Visible` エンティティ位置で $\nabla \Phi$、$q(\vec{v} \times \vec{\omega})$、$\nabla(\vec{m}\cdot\vec{\omega})$、$\nabla|\nabla\Phi|^2$、表面張力・統計モーメント力を積分 |
+| **6. 不可侵バリア・定在波接触** | `ContactSolver` | └─ 不可侵電子雲バリア反発と定在波の檻 $E_{\text{trap\_max}}$ によるエネルギー奪取・決壊（摩擦熱・帯電・冷間圧接）<br>└─ 連結グループ（電池＋極/セパレータ/－極）と導線パケットの電圧落差電流・ジュール発熱を実行 |
+| **6.5 秩序度 Ψ・相転移** | `PhaseTransitionSolver` | └─ 連続秩序度 $\Psi \in [0, 1]$ を更新し、気化分散（$\Psi \to 0$）および臨界破壊を処理 |
 | **7. 状態通知** | `SpaceStateRepository`<br>`SandboxViewModel` | └─ Repository の状態コミット<br>└─ 新しい `SandboxUiState` を生成し、View へ通知 |
 
 ### 3.2 ユーザー操作フロー（掴む・動かす・こする）

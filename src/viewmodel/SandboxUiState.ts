@@ -29,6 +29,8 @@ export interface SandboxUiState {
   readonly currentPreset: PresetId;
   readonly currentMediumId: MediumId;
   readonly activeDischargeCount: number;
+  readonly eventHorizonCount: number;
+  readonly circuitCurrent: number;
   readonly perceptualScaleLog10: number;
   readonly manualScaleLog10: number | null;
   readonly activePacketCount: number;

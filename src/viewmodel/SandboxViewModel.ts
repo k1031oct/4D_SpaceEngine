@@ -2,6 +2,7 @@ import { SimilarityAnalyzer } from '../core/SimilarityAnalyzer';
 import { SpaceEngineCore } from '../core/SpaceEngineCore';
 import type {
   DebugOverlayMode,
+  InjectorBrushMode,
   MediumId,
   ObserverState,
   PresetId,
@@ -48,6 +49,8 @@ export class SandboxViewModel {
     totalEnergy: 0,
     dtEffective: 0,
     activeDischargeCount: 0,
+    eventHorizonCount: 0,
+    circuitCurrent: 0,
   };
   private listeners: UiStateListener[] = [];
 
@@ -90,7 +93,11 @@ export class SandboxViewModel {
         useObserver ? this.observer : undefined,
         this.repository.getCurrentMedium(),
       );
-      this.lastMetrics = res.metrics;
+      this.lastMetrics = {
+        ...res.metrics,
+        eventHorizonCount: res.metrics.eventHorizonCount ?? 0,
+        circuitCurrent: res.metrics.circuitCurrent ?? 0,
+      };
       this.repository.entities = res.entities;
     }
     this.notify();
@@ -118,6 +125,19 @@ export class SandboxViewModel {
 
   public setMedium(mediumId: MediumId): void {
     this.repository.currentMediumId = mediumId;
+    this.notify();
+  }
+
+  /**
+   * 空間内の指定座標へ気体・熱・光パルスを注入するインジェクターブラシ
+   */
+  public injectBrushAt(
+    pos: Vec3,
+    radius: number,
+    mode: InjectorBrushMode,
+    strength = 1.0,
+  ): void {
+    this.core.getMediumSolver().injectBrush(this.core.grid, pos, radius, mode, strength);
     this.notify();
   }
 
@@ -330,6 +350,8 @@ export class SandboxViewModel {
       currentPreset: this.repository.currentPreset,
       currentMediumId: this.repository.currentMediumId,
       activeDischargeCount: this.lastMetrics.activeDischargeCount,
+      eventHorizonCount: this.lastMetrics.eventHorizonCount,
+      circuitCurrent: this.lastMetrics.circuitCurrent,
       perceptualScaleLog10: Math.log10(this.core.grid.cellSize),
       manualScaleLog10: this.observer.manualScaleLog10,
       activePacketCount: this.lastMetrics.activePacketCount,

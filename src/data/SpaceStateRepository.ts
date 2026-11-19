@@ -158,6 +158,47 @@ export class SpaceStateRepository {
         this.createEntity('lab_iron', 'iron_ball', [0.15, 0.14, 0.55], 0.14, 0.5, 0, 'sphere', [0.28, 0.28, 0.28]),
         this.createEntity('lab_ice', 'ice', [0.72, 0.11, 0.55], 0.14, 0.4, 0, 'box', [0.22, 0.22, 0.22]),
       ];
+    } else if (presetId === 'battery_circuit') {
+      // ① 電池連結グループ（＋極・セパレータ・－極）＋ 導線・フィラメント電球回路
+      this.externalSources = [{ id: 'g', uniformField: [0, -9.8, 0] }];
+      this.currentMediumId = 'air';
+      this.entities = [
+        { ...this.createEntity('bat_anode', 'battery_cell', [-0.4, 0.18, 0], 0.18, 1.0, 2.5, 'box', [0.25, 0.36, 0.25]), groupId: 1, groupRole: 'anode', isGrounded: true },
+        { ...this.createEntity('bat_sep', 'battery_cell', [-0.65, 0.18, 0], 0.16, 1.0, 0, 'box', [0.2, 0.36, 0.25]), groupId: 1, groupRole: 'separator', chemicalEnergy: 5.0, isGrounded: true },
+        { ...this.createEntity('bat_cathode', 'battery_cell', [-0.9, 0.18, 0], 0.18, 1.0, -2.5, 'box', [0.25, 0.36, 0.25]), groupId: 1, groupRole: 'cathode', isGrounded: true },
+        { ...this.createEntity('wire_1', 'copper_wire', [-0.4, 0.18, 0.32], 0.12, 0.5, 0, 'cylinder', [0.16, 0.24, 0.16]), groupId: 2, groupRole: 'wire' },
+        { ...this.createEntity('bulb_1', 'tungsten_bulb', [-0.65, 0.18, 0.32], 0.15, 0.6, 0, 'sphere', [0.3, 0.3, 0.3]), groupId: 2, groupRole: 'bulb' },
+        { ...this.createEntity('wire_2', 'copper_wire', [-0.9, 0.18, 0.32], 0.12, 0.5, 0, 'cylinder', [0.16, 0.24, 0.16]), groupId: 2, groupRole: 'wire' },
+      ];
+    } else if (presetId === 'helium_balloon_burst') {
+      // ② ヘリウム風船の浮上と破裂拡散
+      this.externalSources = [{ id: 'g', uniformField: [0, -9.8, 0] }];
+      this.currentMediumId = 'air';
+      this.entities = [
+        {
+          ...this.createEntity('he_balloon', 'rubber_balloon', [0, 0.4, 0], 0.24, 0.00004, 0, 'balloon', [0.42, 0.48, 0.42]),
+          elasticEnergy: 0,
+        },
+      ];
+    } else if (presetId === 'thermal_convection') {
+      // ③ 温冷空気の対流混合
+      this.externalSources = [{ id: 'g', uniformField: [0, -9.8, 0] }];
+      this.currentMediumId = 'air';
+      this.entities = [
+        this.createEntity('probe_paper', 'paper', [0, 1.0, 0], 0.12, 0.05, 0, 'sheet', [0.24, 0.016, 0.18]),
+      ];
+    } else if (presetId === 'black_hole_horizon') {
+      // ④ 高密度光焦点によるブラックホール（事象の地平面）生成
+      this.externalSources = [];
+      this.currentMediumId = 'vacuum';
+      this.entities = [
+        {
+          ...this.createEntity('bh_core', 'tungsten_bulb', [0, 1.5, 0], 0.22, 500, 0, 'sphere', [0.44, 0.44, 0.44]),
+          isBlackHole: true,
+          eventHorizonRadius: 0.45,
+        },
+        this.createEntity('orbit_probe', 'iron_ball', [1.1, 1.5, 0], 0.14, 0.5, 0, 'sphere', [0.28, 0.28, 0.28]),
+      ];
     }
   }
 

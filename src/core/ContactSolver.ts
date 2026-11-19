@@ -15,7 +15,7 @@ export class ContactSolver {
     materials: ReadonlyMap<string, MaterialSpec>,
     dt: number,
     config: SpaceCoreConfig,
-  ): void {
+  ): number {
     // 1. 位置積分と弾性圧縮ひずみの復元減衰
     for (const ent of entities) {
       if ((ent.compression ?? 0) > 0) {
@@ -232,6 +232,89 @@ export class ContactSolver {
         }
       }
     }
+
+    // 4. 連結グループ（電池＋極/セパレータ/－極 ＋ 導線・電球回路）の駆動とジュール発熱
+    return this.solveBatteryCircuits(entities, materials, dt);
+  }
+
+  /**
+   * 連結グループ（電池＋極・セパレータ・－極）と導線・電球回路の気圧落差電流を計算する
+   */
+  private solveBatteryCircuits(
+    entities: SpaceEntity[],
+    materials: ReadonlyMap<string, MaterialSpec>,
+    dt: number,
+  ): number {
+    const anodes = entities.filter((e) => e.groupRole === 'anode');
+    const separators = entities.filter((e) => e.groupRole === 'separator');
+    const cathodes = entities.filter((e) => e.groupRole === 'cathode');
+    if (anodes.length === 0 || separators.length === 0 || cathodes.length === 0) {
+      return 0;
+    }
+
+    let totalCurrent = 0;
+    for (const sep of separators) {
+      const chem = sep.chemicalEnergy ?? 0;
+      if (chem <= 0) continue;
+
+      const gid = sep.groupId;
+      const anode = anodes.find((a) => a.groupId === gid) ?? anodes[0];
+      const cathode = cathodes.find((c) => c.groupId === gid) ?? cathodes[0];
+
+      // 1. セパレータの一方向電荷ポンプ作用：＋極と－極の間に気圧落差（電圧 V = ΔP_+ - ΔP_-）を維持
+      const targetVoltage = 2.5;
+      if (anode.netCharge < targetVoltage) {
+        anode.netCharge += (targetVoltage - anode.netCharge) * Math.min(1, 10 * dt);
+      }
+      if (cathode.netCharge > -targetVoltage) {
+        cathode.netCharge += (-targetVoltage - cathode.netCharge) * Math.min(1, 10 * dt);
+      }
+
+      // 2. 導線・電球パケットが閉回路として接続されているか判定
+      const circuitNodes = entities.filter(
+        (e) => e.groupRole === 'wire' || e.groupRole === 'bulb',
+      );
+      if (circuitNodes.length === 0) continue;
+
+      const isNear = (p1: SpaceEntity, p2: SpaceEntity) => {
+        const dx = p1.position[0] - p2.position[0];
+        const dy = p1.position[1] - p2.position[1];
+        const dz = p1.position[2] - p2.position[2];
+        const reach = p1.radius + p2.radius + 0.15;
+        return dx * dx + dy * dy + dz * dz <= reach * reach;
+      };
+
+      const touchesAnode = circuitNodes.some((n) => isNear(n, anode));
+      const touchesCathode = circuitNodes.some((n) => isNear(n, cathode));
+
+      if (touchesAnode && touchesCathode) {
+        const voltage = anode.netCharge - cathode.netCharge;
+        // 回路全体の有効導電率から電流フラックス I を算出
+        let minCond = 1.0;
+        for (const n of circuitNodes) {
+          const cond = materials.get(n.materialId)?.conductivity ?? 0.5;
+          if (cond < minCond) minCond = cond;
+        }
+        const current = Math.max(0, voltage * minCond);
+        totalCurrent += current;
+
+        // 抵抗部（電球や導電率の低い導線）でジュール発熱 (I² R Δt) を生じ、化学エネルギーを消費
+        const chemBurn = Math.min(chem, current * 0.25 * dt);
+        sep.chemicalEnergy = chem - chemBurn;
+        for (const n of circuitNodes) {
+          const cond = materials.get(n.materialId)?.conductivity ?? 0.5;
+          const resistance = Math.max(0.05, 1.0 - cond);
+          n.internalHeat += current * current * resistance * dt * 1.5;
+        }
+        // 化学エネルギーが枯渇したら電圧も自然減衰
+        if (sep.chemicalEnergy <= 0.001) {
+          sep.chemicalEnergy = 0;
+          anode.netCharge *= 0.5;
+          cathode.netCharge *= 0.5;
+        }
+      }
+    }
+    return totalCurrent;
   }
 
   /**
@@ -260,12 +343,46 @@ export class ContactSolver {
     const tvz = rvz - velAlongNormal * nz;
     const tangentSpeed = Math.sqrt(tvx * tvx + tvy * tvy + tvz * tvz);
 
-    // 2. 摩擦帯電（少なくとも一方が絶縁性であり、接線滑りが生じている場合）
+    // 2. 定在波の檻 E_trap_max = ΔP_⊥ * M(λ_A, λ_B, U_0A, U_0B) - γ U_vib と冷間圧接・摩擦帯電
     const minCond = Math.min(matA.conductivity, matB.conductivity);
-    if (tangentSpeed > 0.02) {
-      const heat = 0.05 * tangentSpeed * dt;
-      a.internalHeat += heat;
-      b.internalHeat += heat;
+    const totalHeat = a.internalHeat + b.internalHeat;
+
+    // 極低温・同種物質・高圧接触での境界融合（冷間圧接）
+    if (a.materialId === b.materialId && totalHeat < 0.04 && Math.abs(velAlongNormal) < 0.5) {
+      a.isColdWelded = true;
+      b.isColdWelded = true;
+      const avgVx = (a.velocity[0] + b.velocity[0]) * 0.5;
+      const avgVy = (a.velocity[1] + b.velocity[1]) * 0.5;
+      const avgVz = (a.velocity[2] + b.velocity[2]) * 0.5;
+      a.velocity = [avgVx, avgVy, avgVz];
+      b.velocity = [avgVx, avgVy, avgVz];
+    }
+
+    if (tangentSpeed > 0.01) {
+      const lamA = matA.surfaceWavelength ?? 0.3;
+      const lamB = matB.surfaceWavelength ?? 0.3;
+      const u0A = matA.surfacePotentialDepth ?? 0.5;
+      const u0B = matB.surfacePotentialDepth ?? 0.5;
+      const resonanceM = (u0A + u0B) / (1.0 + Math.abs(lamA - lamB) / Math.max(lamA, lamB, 0.05));
+      const normalPressure = Math.max(0.2, Math.abs(velAlongNormal) + 0.5);
+      const trapMax = Math.max(0.05, normalPressure * resonanceM - 0.12 * totalHeat);
+
+      const kinTangent = 0.5 * Math.min(a.mass, b.mass) * tangentSpeed * tangentSpeed;
+      if (kinTangent <= trapMax) {
+        // 定在波の檻に捕獲：エネルギーを蓄積し、微量の散逸熱を発生
+        a.trapEnergyStored = (a.trapEnergyStored ?? 0) + kinTangent * 0.2 * dt;
+        b.trapEnergyStored = (b.trapEnergyStored ?? 0) + kinTangent * 0.2 * dt;
+        a.internalHeat += 0.01 * tangentSpeed * dt;
+        b.internalHeat += 0.01 * tangentSpeed * dt;
+      } else {
+        // 限界突破（決壊）：蓄積エネルギーを摩擦熱 U_vib へ一気に解放し動摩擦へ移行
+        const releasedTrap = (a.trapEnergyStored ?? 0) + (b.trapEnergyStored ?? 0);
+        a.trapEnergyStored = 0;
+        b.trapEnergyStored = 0;
+        const heat = (0.05 * tangentSpeed + releasedTrap * 0.5) * dt + releasedTrap * 0.25;
+        a.internalHeat += heat;
+        b.internalHeat += heat;
+      }
 
       if (minCond < 0.35 && !a.isGrounded && !b.isGrounded) {
         const deltaAffinity = matA.electronAffinity - matB.electronAffinity;

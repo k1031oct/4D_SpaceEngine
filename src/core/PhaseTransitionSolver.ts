@@ -117,12 +117,14 @@ export class PhaseTransitionSolver {
         if (ent.internalHeat < 0) ent.internalHeat = 0;
       }
 
-      // 3. 結合エネルギー閾値に基づく相状態判定
+      // 3. 連続秩序度 Ψ ∈ [0, 1] の更新と連続相状態の導出
+      const psi = PhaseTransitionSolver.getEffectiveBondRatio(ent, mat);
+      ent.orderParameter = psi;
       const prevPhase: PhaseState = ent.phaseState ?? 'solid';
       let nextPhase: PhaseState = 'solid';
       if (ent.internalHeat >= mat.bindingEnergy * 2.5) {
         nextPhase = 'gas';
-      } else if (ent.internalHeat >= mat.bindingEnergy) {
+      } else if (psi < 0.35) {
         nextPhase = 'liquid';
       }
       ent.phaseState = nextPhase;
@@ -156,6 +158,10 @@ export class PhaseTransitionSolver {
         !ent.isGrabbed
       ) {
         // 弾性エネルギーが結合エネルギーを超過：結合破断し2つの破片へ分裂
+        if (mat.topology === 'hollow' && grid) {
+          // 中空容器（ヘリウム風船等）の破裂：放射状の圧力衝撃波と低密度ガスを空間へ放出
+          this.injectBurstShockwave(grid, ent.position, ent.elasticEnergy ?? 5.0);
+        }
         const fragments = this.fractureEntity(ent);
         nextEntities.push(...fragments);
       } else {
@@ -257,6 +263,38 @@ export class PhaseTransitionSolver {
         domainClass: 'Visible',
       };
     });
+  }
+
+  private injectBurstShockwave(
+    grid: SpacePacketGrid,
+    pos: readonly [number, number, number],
+    burstEnergy: number,
+  ): void {
+    const [gx, gy, gz] = grid.worldToGrid([pos[0], pos[1], pos[2]]);
+    const cx = Math.max(1, Math.min(grid.nx - 2, Math.round(gx)));
+    const cy = Math.max(1, Math.min(grid.ny - 2, Math.round(gy)));
+    const cz = Math.max(1, Math.min(grid.nz - 2, Math.round(gz)));
+    const cIdx = grid.index(cx, cy, cz);
+    grid.phi[cIdx] += burstEnergy * 1.5;
+    grid.mediumDensity[cIdx] = 0.00018; // 封入ヘリウムの放出
+    grid.mediumConcentration[cIdx] = 1.0;
+    grid.isSleeping[cIdx] = 0;
+
+    // 周囲6近傍へ放射状の圧力波（破裂音・衝撃波）を駆動
+    const dirs: readonly [number, number, number][] = [
+      [1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1],
+    ];
+    for (const [dx, dy, dz] of dirs) {
+      const nIdx = grid.index(
+        Math.max(1, Math.min(grid.nx - 2, cx + dx)),
+        Math.max(1, Math.min(grid.ny - 2, cy + dy)),
+        Math.max(1, Math.min(grid.nz - 2, cz + dz)),
+      );
+      grid.px[nIdx] += dx * burstEnergy * 0.8;
+      grid.py[nIdx] += (dy + 0.5) * burstEnergy * 0.8;
+      grid.pz[nIdx] += dz * burstEnergy * 0.8;
+      grid.isSleeping[nIdx] = 0;
+    }
   }
 
   private injectCombustionEnergy(

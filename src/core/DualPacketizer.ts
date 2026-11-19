@@ -25,9 +25,10 @@ export class DualPacketizer {
       const clusterEnt = entities.find((e) => e.id === clusterId);
       const children = entities.filter((e) => clusterState.childIds.includes(e.id));
 
-      // 子オブジェクトの最大半径がパケットサイズの 0.25 倍以上になったら展開
+      // 子オブジェクトの最大半径がパケットサイズの 0.22 倍以上、または臨界アップスケールトリガー発動時に展開
       const maxChildRadius = children.reduce((m, c) => Math.max(m, c.radius), 0);
-      const shouldUnpack = !clusterEnt || maxChildRadius >= cellSize * 0.22;
+      const shouldUnpack =
+        !clusterEnt || maxChildRadius >= cellSize * 0.22 || Boolean(clusterEnt.isCriticalSubgrid);
 
       if (shouldUnpack) {
         if (clusterEnt) {
@@ -48,6 +49,9 @@ export class DualPacketizer {
             child.velocity[2] += dvz;
             child.packedIntoId = undefined;
             child.domainClass = 'Visible';
+            if (clusterEnt.isCriticalSubgrid) {
+              child.isCriticalSubgrid = true;
+            }
           }
         } else {
           for (const child of children) {
@@ -86,6 +90,9 @@ export class DualPacketizer {
 
     for (const [cellKey, group] of cellGroups.entries()) {
       if (group.length < 2) continue;
+      // すでに臨界アップスケールトリガーで展開済みのグループは再統合しない
+      const alreadyTriggered = group.some((g) => g.isCriticalSubgrid);
+      if (alreadyTriggered) continue;
 
       const clusterId = `cluster_${cellKey}_${group.map((g) => g.id).join('_')}`;
       if (this.activeClusters.has(clusterId)) continue;
@@ -147,11 +154,16 @@ export class DualPacketizer {
     const cm: Vec3 = [cmX * invM, cmY * invM, cmZ * invM];
     const vCm: Vec3 = [momX * invM, momY * invM, momZ * invM];
 
-    // 電気双極子モーメント p = Σ q_k (r_k - r_cm) と配置内部運動エネルギー U_conf
+    // 1次モーメント（双極子・異方性軸）と2次モーメント（分散 σ_E²・局所ピーク δE_max）を算出
     let dipX = 0;
     let dipY = 0;
     let dipZ = 0;
     let maxDist = 0;
+    let anisoX = 0;
+    let anisoY = 0;
+    let anisoZ = 0;
+    const childEnergies: number[] = [];
+
     for (const e of group) {
       const rx = e.position[0] - cm[0];
       const ry = e.position[1] - cm[1];
@@ -163,11 +175,31 @@ export class DualPacketizer {
       const dvx = e.velocity[0] - vCm[0];
       const dvy = e.velocity[1] - vCm[1];
       const dvz = e.velocity[2] - vCm[2];
-      internalHeat += 0.5 * e.mass * (dvx * dvx + dvy * dvy + dvz * dvz);
+      const relK = 0.5 * e.mass * (dvx * dvx + dvy * dvy + dvz * dvz);
+      internalHeat += relK;
+
+      const eLocal = e.internalHeat + relK;
+      childEnergies.push(eLocal);
+      anisoX += eLocal * rx;
+      anisoY += eLocal * ry;
+      anisoZ += eLocal * rz;
 
       const d = Math.sqrt(rx * rx + ry * ry + rz * rz) + e.radius;
       if (d > maxDist) maxDist = d;
     }
+
+    const meanE = childEnergies.reduce((s, v) => s + v, 0) / Math.max(childEnergies.length, 1);
+    let variance = 0;
+    let peakDev = 0;
+    for (const eVal of childEnergies) {
+      const dev = eVal - meanE;
+      variance += dev * dev;
+      if (dev > peakDev) peakDev = dev;
+    }
+    variance /= Math.max(childEnergies.length, 1);
+
+    // 臨界ホットスポット判定: E_bar + δE_max >= E_barrier (デフォルト障壁 15.0)
+    const isCriticalSubgrid = meanE + peakDev >= 15.0;
 
     return {
       id: clusterId,
@@ -181,6 +213,10 @@ export class DualPacketizer {
       dipoleMoment: [dipX, dipY, dipZ],
       magneticMoment: [magX, magY, magZ],
       internalHeat,
+      deviationVariance: variance,
+      peakDeviation: peakDev,
+      anisotropyAxis: [anisoX, anisoY, anisoZ],
+      isCriticalSubgrid,
       isGrounded: false,
       isGrabbed: false,
       isSleeping: false,

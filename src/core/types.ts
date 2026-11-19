@@ -16,6 +16,25 @@ export type DebugOverlayMode = 'none' | 'pressure' | 'vorticity' | 'octree';
 
 export type MediumId = 'vacuum' | 'air' | 'helium' | 'neon' | 'water';
 
+export type MaterialTopology = 'solid' | 'hollow' | 'porous' | 'fluid';
+
+export type GroupRole =
+  | 'anode'
+  | 'separator'
+  | 'cathode'
+  | 'wire'
+  | 'bulb'
+  | 'shell'
+  | 'core';
+
+export type InjectorBrushMode =
+  | 'hot_air'
+  | 'cold_air'
+  | 'helium'
+  | 'oxygen'
+  | 'vacuum'
+  | 'light_pulse';
+
 export type PresetId =
   | 'gravity_rest'
   | 'dipole_pair'
@@ -23,7 +42,11 @@ export type PresetId =
   | 'tribo_induction'
   | 'magnet_attraction'
   | 'multi_scale_solar'
-  | 'sandbox_lab';
+  | 'sandbox_lab'
+  | 'battery_circuit'
+  | 'helium_balloon_burst'
+  | 'thermal_convection'
+  | 'black_hole_horizon';
 
 /**
  * 空間を満たす背景媒質（真空・気体・液体）の物性定義
@@ -75,6 +98,22 @@ export interface MaterialSpec {
   readonly elasticity?: number;
   /** 塑性・粘弾性散逸率（0=完全弾性、1=変形エネルギーをすべて熱へ散逸） */
   readonly plasticity?: number;
+  /** 電荷格子パラメータ：単位体積あたりの結合電荷密度 */
+  readonly bondChargeDensity?: number;
+  /** 平衡格子間隔 */
+  readonly equilibriumSpacing?: number;
+  /** 表面波紋波長 λ（定在波の檻の共鳴計算用） */
+  readonly surfaceWavelength?: number;
+  /** 表面ポテンシャル井戸深さ U_0 */
+  readonly surfacePotentialDepth?: number;
+  /** 固有共鳴周波数 ω_0（光の透過・反射・共鳴吸収分岐用） */
+  readonly resonantFrequency?: number;
+  /** 保磁力障壁（強磁性・強誘電ヒステリシス閾値） */
+  readonly coerciveBarrier?: number;
+  /** 構造トポロジー */
+  readonly topology?: MaterialTopology;
+  /** 中空・外殻厚み比 */
+  readonly shellThicknessRatio?: number;
   /** 静止摩擦係数 μ_s */
   readonly staticFriction: number;
   /** 動摩擦係数 μ_d */
@@ -116,6 +155,34 @@ export interface SpaceEntity {
   compression?: number;
   /** 現在の相状態（固体 / 液体 / 気体） */
   phaseState?: PhaseState;
+  /** 連続秩序度（結合維持率）Ψ ∈ [0, 1]（1=固体ロック, 0=完全自由気体） */
+  orderParameter?: number;
+  /** 定在波の檻に蓄積されたエネルギー */
+  trapEnergyStored?: number;
+  /** 連結パケットグループID (-1=単独) */
+  groupId?: number;
+  /** 連結グループ内での機能ロール */
+  groupRole?: GroupRole;
+  /** 電池グループ等の化学エネルギー残量 */
+  chemicalEnergy?: number;
+  /** サブグリッド2次モーメント分散 σ_E² */
+  deviationVariance?: number;
+  /** サブグリッド最大局所ピーク δE_max */
+  peakDeviation?: number;
+  /** 1次・2次異方性軸ベクトル */
+  anisotropyAxis?: Vec3;
+  /** 臨界アップスケールトリガーフラグ */
+  isCriticalSubgrid?: boolean;
+  /** 冷間圧接による結合状態 */
+  isColdWelded?: boolean;
+  /** ブラックホール（事象の地平面自己捕獲）状態 */
+  isBlackHole?: boolean;
+  /** 事象の地平面半径 */
+  eventHorizonRadius?: number;
+  /** 不可侵ハードバリア半径 */
+  hardBarrierRadius?: number;
+  /** 連結すき間サイズ d_gap（サイズ選別浸透用） */
+  gapSpacing?: number;
   /** 酸化還元反応（燃焼）中フラグ */
   isBurning?: boolean;
   /** 可燃残量 (0..1) */
@@ -225,4 +292,6 @@ export interface CoreStepMetrics {
   readonly totalEnergy: number;
   readonly dtEffective: number;
   readonly activeDischargeCount: number;
+  readonly eventHorizonCount?: number;
+  readonly circuitCurrent?: number;
 }
