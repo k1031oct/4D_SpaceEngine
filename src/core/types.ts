@@ -212,6 +212,63 @@ export interface SpaceEntity {
   gravityStrength?: number;
   /** 統合クラスターID（Packされている場合） */
   packedIntoId?: string;
+  /** Phase 11: エラー排出された泥塊・破損トークンフラグ */
+  isWasteToken?: boolean;
+}
+
+export type EnergyType = 'kinetic' | 'light' | 'thermal' | 'electric';
+
+/**
+ * 論理エネルギー変換モジュール定義（Phase 11）
+ * @see DATA_FLOW.md §4.2
+ */
+export interface LogicalModuleSpec {
+  readonly id: string;
+  readonly entityId: string;
+  readonly inputEnergyType: EnergyType;
+  readonly outputEnergyType: EnergyType;
+  /** 変換効率 η ∈ (0, 1]：ロス (1 - η) は廃熱・排気として空間へ放出 */
+  readonly efficiency: number;
+  /** エラー発生確率 [0, 1] */
+  readonly failRate: number;
+  /** 出力運動フローの指向性ベクトル */
+  readonly targetFlowDir?: Vec3;
+  /** 1秒あたり最大吸収エネルギー量 */
+  readonly maxThroughput?: number;
+  /** 廃棄トークン回収（リサイクル）モジュールフラグ */
+  readonly isRecycler?: boolean;
+}
+
+export interface BioSensoryWeights {
+  readonly light: number;
+  readonly heat: number;
+  readonly oxGradient: number;
+  readonly pressureShock: number;
+}
+
+export type BioActionType =
+  | 'idle'
+  | 'forage'
+  | 'seek_light'
+  | 'seek_warmth'
+  | 'flee_heat'
+  | 'flee_shock';
+
+/**
+ * 自律生物エージェント状態（Phase 11）
+ * 座標の直接参照を行わず、占有・隣接空間パケットの勾配のみを知覚して行動する。
+ * @see DATA_FLOW.md §4.2
+ */
+export interface BioAgentState {
+  readonly instanceId: string;
+  readonly entityId: string;
+  readonly speciesId: string;
+  metabolicEnergy: number;
+  readonly maxMetabolicEnergy: number;
+  readonly comfortTempRange: readonly [number, number];
+  readonly sensoryWeights: BioSensoryWeights;
+  readonly thrustForce: number;
+  lastAction: BioActionType;
 }
 
 /**
@@ -326,4 +383,7 @@ export interface CoreStepMetrics {
   readonly handedOffEntityCount?: number;
   readonly condensedEntityCount?: number;
   readonly vaporizedToFieldCount?: number;
+  readonly moduleConversionCount?: number;
+  readonly emittedWasteHeat?: number;
+  readonly activeBioAgentCount?: number;
 }

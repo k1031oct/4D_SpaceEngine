@@ -81,11 +81,11 @@
   * [x] Task 4: 「場（ガス）」$\leftrightarrow$「オブジェクト（凝縮体）」双方向相転移パイプライン（凝縮昇格 Materialization ＆ 気化還元 Vaporization の厳密保存則）
   * [x] Task 5: 観測者移動・マルチレイヤー・双方向相転移の検証テストスイート（`tests/phase10_nested_stack.spec.ts`）追加＆ビルド全パス
 
-### Phase 11：論理変換モジュール ＆ 生命エージェント層（設計草案）
+### Phase 11：論理変換モジュール ＆ 生命エージェント層
 * **実装タスク：**
-  * [ ] Task 1: `EnergyModuleSolver` 実装（運動・光・熱・電力のエネルギー型変換、効率ロス廃熱・排気排出、エラー泥塊トークン生成）
-  * [ ] Task 2: `BioAgentSolver` 実装（空間パケット五感勾配センサー、代謝消費による能動推力、個体識別 `instanceId` ＆逃避・採餌行動）
-  * [ ] Task 3: 工場廃熱・川ゾーニング・生態系変化の統合検証テスト（`tests/phase11_logic_and_bio.spec.ts`）追加＆ビルド全パス
+  * [x] Task 1: `EnergyModuleSolver` 実装（運動・光・熱・電力のエネルギー型変換、効率ロス廃熱・排気排出、エラー泥塊トークン生成）
+  * [x] Task 2: `BioAgentSolver` 実装（空間パケット五感勾配センサー、代謝消費による能動推力、個体識別 `instanceId` ＆逃避・採餌行動）
+  * [x] Task 3: 工場廃熱・川ゾーニング・生態系変化の統合検証テスト（`tests/phase11_logic_and_bio.spec.ts`）追加＆ビルド全パス
 
 ### Phase 12〜13：Android ネイティブ移植 ＆ 「テラリウム・ビルダー」製品化
 * **実装予定：** TypeScript Pure Core の Kotlin（`FloatArray`/`IntArray` + Coroutines）への 1対1 移植、Jetpack Compose 2D/2.5D ビュー、Room DB スクラップブック、外部 JSON Mod ローダー連携

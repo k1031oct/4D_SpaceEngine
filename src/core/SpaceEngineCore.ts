@@ -1,7 +1,9 @@
+import { BioAgentSolver } from './BioAgentSolver';
 import { BoundaryProjector } from './BoundaryProjector';
 import { ContactSolver } from './ContactSolver';
 import { CpuTypedArrayBackend } from './CpuTypedArrayBackend';
 import { DualPacketizer } from './DualPacketizer';
+import { EnergyModuleSolver } from './EnergyModuleSolver';
 import type { ISpatialComputeBackend } from './ISpatialComputeBackend';
 import { NestedPerceptualStack } from './NestedPerceptualStack';
 import { PerceptualScaler } from './PerceptualScaler';
@@ -9,8 +11,10 @@ import { PhaseTransitionSolver } from './PhaseTransitionSolver';
 import { SpacePacketGrid } from './SpacePacketGrid';
 import type {
   AmbientMediumSpec,
+  BioAgentState,
   CoreStepMetrics,
   InjectorBrushMode,
+  LogicalModuleSpec,
   MaterialSpec,
   ObserverState,
   ProjectedExternalSource,
@@ -35,6 +39,8 @@ export class SpaceEngineCore {
   private readonly contactSolver = new ContactSolver();
   private readonly phaseSolver = new PhaseTransitionSolver();
   private readonly nestedStack: NestedPerceptualStack;
+  private readonly energyModuleSolver = new EnergyModuleSolver();
+  private readonly bioAgentSolver = new BioAgentSolver();
 
   constructor(config: SpaceCoreConfig, backend: ISpatialComputeBackend = new CpuTypedArrayBackend()) {
     this.config = config;
@@ -132,6 +138,8 @@ export class SpaceEngineCore {
     observer?: ObserverState,
     medium?: AmbientMediumSpec,
     mediaCatalog?: ReadonlyMap<string, AmbientMediumSpec>,
+    logicalModules?: readonly LogicalModuleSpec[],
+    bioAgents?: BioAgentState[],
   ): { metrics: CoreStepMetrics; entities: SpaceEntity[] } {
     let activeEntities = entities;
     let combinedExternalSources = [...externalSources];
@@ -241,6 +249,33 @@ export class SpaceEngineCore {
       activeEntities = [...activeEntities, ...condensed];
     }
 
+    // 7. 論理変換モジュール ＆ 自律生物エージェント層（Phase 11）
+    let moduleConversionCount = 0;
+    let emittedWasteHeat = 0;
+    if (logicalModules && logicalModules.length > 0) {
+      const modRes = this.energyModuleSolver.solve(
+        logicalModules,
+        activeEntities,
+        this.grid,
+        effectiveFrameDt,
+      );
+      moduleConversionCount = modRes.conversions;
+      emittedWasteHeat = modRes.wasteHeatEmitted;
+      if (modRes.spawnedWasteTokens.length > 0) {
+        activeEntities = [...activeEntities, ...modRes.spawnedWasteTokens];
+      }
+    }
+
+    let activeBioAgentCount = 0;
+    if (bioAgents && bioAgents.length > 0) {
+      activeBioAgentCount = this.bioAgentSolver.solve(
+        bioAgents,
+        activeEntities,
+        this.grid,
+        effectiveFrameDt,
+      );
+    }
+
     return {
       metrics: {
         ...metrics,
@@ -248,6 +283,9 @@ export class SpaceEngineCore {
         layerSnapshots,
         handedOffEntityCount: this.nestedStack.getHandedOffCount(),
         condensedEntityCount: condensed.length,
+        moduleConversionCount,
+        emittedWasteHeat,
+        activeBioAgentCount,
       },
       entities: activeEntities,
     };
