@@ -298,6 +298,19 @@ export interface SpaceCoreConfig {
   readonly maxMediumSubDt?: number;
 }
 
+export type LayerId = -1 | 0 | 1 | 2 | 3;
+
+export interface LayerMetricsSnapshot {
+  readonly layerId: LayerId;
+  readonly cellSize: number;
+  readonly stride: number;
+  readonly lastUpdatedFrame: number;
+  readonly isDecoupled: boolean;
+  readonly totalHeat: number;
+  readonly totalMediumMass: number;
+  readonly handedOffCount: number;
+}
+
 /**
  * 1ステップ実行結果の統計サマリ
  */
@@ -309,4 +322,8 @@ export interface CoreStepMetrics {
   readonly activeDischargeCount: number;
   readonly eventHorizonCount?: number;
   readonly circuitCurrent?: number;
+  readonly layerSnapshots?: readonly LayerMetricsSnapshot[];
+  readonly handedOffEntityCount?: number;
+  readonly condensedEntityCount?: number;
+  readonly vaporizedToFieldCount?: number;
 }

@@ -3,6 +3,7 @@ import { ContactSolver } from './ContactSolver';
 import { CpuTypedArrayBackend } from './CpuTypedArrayBackend';
 import { DualPacketizer } from './DualPacketizer';
 import type { ISpatialComputeBackend } from './ISpatialComputeBackend';
+import { NestedPerceptualStack } from './NestedPerceptualStack';
 import { PerceptualScaler } from './PerceptualScaler';
 import { PhaseTransitionSolver } from './PhaseTransitionSolver';
 import { SpacePacketGrid } from './SpacePacketGrid';
@@ -33,6 +34,7 @@ export class SpaceEngineCore {
   private readonly boundaryProjector = new BoundaryProjector();
   private readonly contactSolver = new ContactSolver();
   private readonly phaseSolver = new PhaseTransitionSolver();
+  private readonly nestedStack: NestedPerceptualStack;
 
   constructor(config: SpaceCoreConfig, backend: ISpatialComputeBackend = new CpuTypedArrayBackend()) {
     this.config = config;
@@ -44,6 +46,7 @@ export class SpaceEngineCore {
       config.cellSize,
       config.center,
     );
+    this.nestedStack = new NestedPerceptualStack(config.cellSize, config.center);
   }
 
   /**
@@ -52,7 +55,12 @@ export class SpaceEngineCore {
   public resetField(): void {
     this.grid.reset();
     this.dualPacketizer.reset();
+    this.nestedStack.reset(this.config.cellSize, this.config.center);
     this.backend.reset();
+  }
+
+  public getNestedStack(): NestedPerceptualStack {
+    return this.nestedStack;
   }
 
   public getBackend(): ISpatialComputeBackend {
@@ -177,6 +185,17 @@ export class SpaceEngineCore {
 
     // 2. 境界シェル射影（Projected 領域からの重力・遠方ポテンシャル焼き付け）
     const backgroundField = this.boundaryProjector.project(this.grid, combinedExternalSources);
+    const effectiveFrameDt = Math.min(Math.max(rawDt, 1e-5), this.config.maxFrameDt ?? 0.05);
+
+    // 2.5 階層跨ぎハンドオフ（窓外流出 Co-Pack 追跡 ＆ 窓内復帰 Unpack）
+    if (observer || this.nestedStack.getHandedOffCount() > 0) {
+      activeEntities = this.nestedStack.synchronizeHandoff(
+        activeEntities,
+        this.grid,
+        backgroundField,
+        effectiveFrameDt,
+      );
+    }
 
     // 3. 空間場更新（ISpatialComputeBackend 経由で真空チャネル + 媒質チャネルを実行）
     const metrics = this.backend.executeFieldAndMediumStep(
@@ -189,7 +208,14 @@ export class SpaceEngineCore {
       medium,
       mediaCatalog,
     );
-    const effectiveFrameDt = Math.min(Math.max(rawDt, 1e-5), this.config.maxFrameDt ?? 0.05);
+
+    // 3.5 複数レイヤー入れ子知覚スタック更新（時間間引き・10^-6mデカップリング・双方向カスケード）
+    const layerSnapshots = this.nestedStack.stepStack(
+      this.grid,
+      backgroundField,
+      effectiveFrameDt,
+      medium,
+    );
 
     // 4. 不可侵バリア・定在波の檻摩擦・電池連結グループ回路解決
     const circuitCurrent = this.contactSolver.solve(
@@ -202,7 +228,7 @@ export class SpaceEngineCore {
     // 5. エンティティ ⇄ 空間パケット間の双方向熱交換フラックス（C_med == 0 の真空では断熱）
     this.exchangeThermalEnergyWithGrid(activeEntities, effectiveFrameDt);
 
-    // 6. 相転移（連続秩序度 Ψ ∈ [0, 1]）・燃焼・気化集合体分散と環境熱緩和
+    // 6. 相転移（連続秩序度 Ψ ∈ [0, 1]）・燃焼・気化集合体分散と場↔実体双方向変換
     activeEntities = this.phaseSolver.solve(
       activeEntities,
       materials,
@@ -210,11 +236,18 @@ export class SpaceEngineCore {
       medium,
       this.grid,
     );
+    const condensed = this.phaseSolver.condenseFromField(this.grid, materials, activeEntities);
+    if (condensed.length > 0) {
+      activeEntities = [...activeEntities, ...condensed];
+    }
 
     return {
       metrics: {
         ...metrics,
         circuitCurrent,
+        layerSnapshots,
+        handedOffEntityCount: this.nestedStack.getHandedOffCount(),
+        condensedEntityCount: condensed.length,
       },
       entities: activeEntities,
     };

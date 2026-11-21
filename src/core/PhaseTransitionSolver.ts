@@ -226,6 +226,15 @@ export class PhaseTransitionSolver {
         const dispersed = this.disperseIntoVaporCluster(ent);
         nextEntities.push(...dispersed);
       } else if (
+        nextPhase === 'gas' &&
+        ent.isVaporParticle &&
+        ent.internalHeat >= mat.bindingEnergy * 4.0 &&
+        grid &&
+        !ent.isGrabbed
+      ) {
+        // 極高温気化還元（Vaporization）：離散粒子を空間媒質場へ完全に溶かし込む（質量・電荷・熱保存）
+        this.vaporizeToField(ent, grid);
+      } else if (
         ((ent.elasticEnergy ?? 0) > mat.bindingEnergy || isFatigueFractured) &&
         !ent.isVaporParticle &&
         ent.radius > 0.08 &&
@@ -444,6 +453,91 @@ export class PhaseTransitionSolver {
     const idx = grid.index(ix, iy, iz);
     grid.vibrationEnergy[idx] += energy;
     grid.py[idx] += energy * 0.4; // 上昇気流（熱対流）の駆動
+    grid.isSleeping[idx] = 0;
+  }
+
+  /**
+   * 凝縮昇格（Materialization: 場 → オブジェクト）
+   * 過飽和・過冷却の空間パケットから媒質質量を消費して凝縮体（液滴・氷核）を生成する
+   */
+  public condenseFromField(
+    grid: SpacePacketGrid,
+    materials: ReadonlyMap<string, MaterialSpec>,
+    existingEntities: readonly SpaceEntity[],
+  ): SpaceEntity[] {
+    if (existingEntities.length >= 80) return [];
+    const targetMatId = materials.has('ice') ? 'ice' : materials.keys().next().value;
+    if (!targetMatId) return [];
+
+    const created: SpaceEntity[] = [];
+    for (let z = 1; z < grid.nz - 1; z += 2) {
+      for (let y = 1; y < grid.ny - 1; y += 2) {
+        for (let x = 1; x < grid.nx - 1; x += 2) {
+          if (created.length >= 4) return created;
+          const idx = grid.index(x, y, z);
+          const cMed = grid.mediumConcentration[idx];
+          const rhoMed = grid.mediumDensity[idx];
+          const uVib = grid.vibrationEnergy[idx];
+
+          if (cMed < 0.85 || rhoMed < 0.05 || uVib > 0.02) continue;
+
+          const psiField = Math.min(
+            1.0,
+            ((rhoMed * cMed) / 0.05) * (0.02 / Math.max(uVib, 0.005)),
+          );
+          if (psiField <= 0.75) continue;
+
+          const consumedDensity = Math.min(rhoMed * 0.5, 0.04);
+          const condensedMass = Math.max(1e-4, consumedDensity * cMed * grid.cellVolume);
+          grid.mediumDensity[idx] = Math.max(0, rhoMed - consumedDensity);
+          grid.mediumConcentration[idx] = Math.max(0, cMed * 0.5);
+          grid.isSleeping[idx] = 0;
+
+          const center = grid.packetCenter(x, y, z);
+          this.vaporCounter++;
+          created.push({
+            id: `condensate_${this.vaporCounter}`,
+            materialId: targetMatId,
+            position: [center[0], center[1], center[2]],
+            velocity: [grid.px[idx] * 0.2, grid.py[idx] * 0.2, grid.pz[idx] * 0.2],
+            angularVelocity: [0, 0, 0],
+            radius: Math.max(0.06, grid.cellSize * 0.3),
+            shape: 'sphere',
+            mass: condensedMass,
+            netCharge: 0,
+            dipoleMoment: [0, 0, 0],
+            magneticMoment: [0, 0, 0],
+            internalHeat: uVib * 0.25,
+            phaseState: 'solid',
+            orderParameter: Math.min(1, psiField),
+            isGrounded: false,
+            isGrabbed: false,
+            isSleeping: false,
+            domainClass: 'Visible',
+          });
+        }
+      }
+    }
+    return created;
+  }
+
+  /**
+   * 気化還元（Vaporization: オブジェクト → 場）
+   * エンティティを削除し、質量・電荷・内部熱エネルギーを包含空間パケットへ厳密保存で溶かし込む
+   */
+  public vaporizeToField(entity: SpaceEntity, grid: SpacePacketGrid): void {
+    const [gx, gy, gz] = grid.worldToGrid(entity.position);
+    const ix = Math.max(1, Math.min(grid.nx - 2, Math.round(gx)));
+    const iy = Math.max(1, Math.min(grid.ny - 2, Math.round(gy)));
+    const iz = Math.max(1, Math.min(grid.nz - 2, Math.round(gz)));
+    const idx = grid.index(ix, iy, iz);
+
+    const invVol = 1.0 / Math.max(grid.cellVolume, 1e-6);
+    grid.mediumDensity[idx] += entity.mass * invVol;
+    grid.mediumConcentration[idx] = Math.min(1.0, Math.max(grid.mediumConcentration[idx], 0.5));
+    grid.vibrationEnergy[idx] += entity.internalHeat;
+    grid.phi[idx] += entity.netCharge * invVol;
+    grid.sourcePhi[idx] += entity.netCharge * invVol;
     grid.isSleeping[idx] = 0;
   }
 }

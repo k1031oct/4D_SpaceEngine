@@ -168,3 +168,54 @@ SandboxUiState
 | **掴む / 移動** | `View` $\to$ `SandboxViewModel` | └─ レイキャストで対象 `entityId` を特定し `isGrabbed = true`, `isSleeping = false` に設定<br>└─ 目標座標との差分をばね・ダンパ制御（またはキネマティック移動）で速度へ変換し、接触相手に摩擦・帯電を発生させる |
 | **スケール操作** | `View` $\to$ `SandboxViewModel` | └─ ズーム入力により `perceptualScaleLog10` を更新 $\to$ 次フレームの `PerceptualScaler` に反映 |
 | **リセット / スポーン** | `View` $\to$ `SandboxViewModel` $\to$ `SpaceStateRepository` | └─ Repository の初期プリセットを再構築し、空間場パケットを真空基準（$\Phi=0, \vec{P}=0, \vec{\omega}=0$）へ初期化 |
+
+---
+
+## 4. Phase 10〜11 設計草案（入れ子知覚スタック・双方向相転移・論理＆生命レイヤー）
+
+> **ステータス:** 設計草案（ユーザー承認後に Phase 10 から順次実装へ移行）
+
+### 4.1 Phase 10：複数レイヤー入れ子知覚スタック（`NestedPerceptualStack`）
+単一計算窓の限界（窓外へ出たガスの停止・観測者移動時の矛盾）を解決しつつ、計算量を単一レイヤーの 1.5 倍以内に抑える 5 層構造。
+
+| レイヤー | 相対スケール | 更新間引き | 主な責務とデータフロー（ツリー構造） |
+| :--- | :--- | :--- | :--- |
+| **Layer -1** | $-2.5$ 桁 | Lazy オンデマンド | └─ **ミクロ基底層**：疲労転位・火花・トンネル種火を臨界セルのみ展開<br>└─ **$10^{-6}\text{ m}$ デカップリング**：`cellSize >= 1e-6` 時は自動スリープし演算スキップ |
+| **Layer 0** | $0.0$ 桁 | 毎フレーム ($1\times$) | └─ **知覚フォーカス層**：既存の `SpacePacketGrid` ＋ `FieldSolver` / `MediumFluxSolver` による主演算<br>└─ 窓外へ流出した熱・ガス・運動量フラックスを Layer +1 境界へ受け渡す |
+| **Layer +1** | $+2.5$ 桁 | $4$ フレームに1回 | └─ **環境・箱庭全体層**：Layer 0 窓外の対流・ガス還流・音波伝播を継続演算<br>└─ 上昇した熱気や環境変化を Layer 0 境界シェルへ還流射影 |
+| **Layer +2** | $+5.5$ 桁 | $16$ フレームに1回 | └─ **気象・地形層**：広域の上昇気流成長・気圧配置変化を演算し、風向・気圧勾配として下層へ帰還（バタフライエフェクト） |
+| **Layer +3** | $+9.0$ 桁 | $60$ フレームに1回 | └─ **惑星・背景大気海層**：重力ポテンシャルと大気リザーバーを維持し、下層の質量変化に対する逆射影を受容 |
+
+#### 4.1.1 階層跨ぎハンドオフ（Cross-Layer Handoff）＆「場 $\leftrightarrow$ オブジェクト」双方向相転移
+
+| 機能 | 担当モジュール | データフロー（ツリー構造） |
+| :--- | :--- | :--- |
+| **階層跨ぎハンドオフ** | `NestedPerceptualStack`<br>`DualPacketizer` | └─ **窓外流出時（Co-Pack）**：観測者の `focusPoint` 移動や高速飛行で Layer 0 窓外へ出た `SpaceEntity` を即座に消滅させず、上位レイヤー（Layer +1 / +2）の統計モーメント＋粗視化運動状態へ畳み込んで継続追跡<br>└─ **窓内復帰時（Unpack）**：再び Layer 0 窓内に入った瞬間に元の `SpaceEntity`（位置・速度・熱・電荷を保存）として再展開 |
+| **凝縮昇格（場 $\to$ 実体）** | `PhaseTransitionSolver` | └─ 空間パケットの媒質濃度 $C_{\text{med}}$・密度 $\rho_{\text{med}}$ が臨界を超え、かつ低温（低 $U_{\text{vib}}$）で連続秩序度 $\Psi$ が凝固閾値を超えた場合、パケットの媒質質量を消費して液滴・固体コア（`SpaceEntity`）を生成 |
+| **気化還元（実体 $\to$ 場）** | `PhaseTransitionSolver` | └─ `SpaceEntity` が加熱されて $\Psi \to 0$（気相臨界）に達した際、離散エンティティを空間場へ溶かし込み、質量・電荷・内部熱を包含パケットの `mediumDensity`, `mediumConcentration`, `sourcePhi`, `vibrationEnergy` へ厳密保存で加算 |
+
+---
+
+### 4.2 Phase 11：論理ワークフロー ＆ 生命エージェント層（`Logic & Bio Agency Layer`）
+空間演算エンジンが生成する「光・熱・風・水流・ガス濃度」の上で稼働するアプリケーション固有知能層。
+
+```
+LogicalModuleSpec (変換モジュール定義)
+  ├─ id: string
+  ├─ inputEnergyType: "kinetic" | "light" | "thermal" | "electric"
+  ├─ outputEnergyType: "kinetic" | "light" | "thermal" | "electric"
+  ├─ efficiency: number          (変換効率 η ∈ (0, 1]：ロス (1 - η) は廃熱・ガスへ)
+  └─ failRate: number            (エラー確率：発生時は泥塊/破損トークンを物理排出)
+
+BioAgentState (自律生物エージェント：SpaceEntity 拡張または連結グループ)
+  ├─ instanceId: string          (個体識別 ID：スクラップブック命名用)
+  ├─ speciesId: string           (種族 ID：走光性昆虫・分解者・水棲生物 等)
+  ├─ metabolicEnergy: number     (内部代謝エネルギー：消費して能動推力を生成)
+  ├─ comfortTempRange: [min, max] (適温 $U_{\text{vib}}$ レンジ)
+  └─ sensoryWeights: { light, heat, oxGradient, pressureShock }
+```
+
+| モジュール | 役割 | データフロー（ツリー構造） |
+| :--- | :--- | :--- |
+| **エネルギー型変換** | `EnergyModuleSolver` | └─ 占有パケットから入力エネルギー（$\vec{P}$・光・$U_{\text{vib}}$）を吸収し、$\eta$ 倍を出力エネルギーとして隣接パケットへ再注入<br>└─ ロス分 $(1 - \eta)$ を廃熱 `vibrationEnergy` および排気 `reactivityPotential` として空間へ放出（工場廃熱による環境汚染の創発） |
+| **空間五感＆能動推力** | `BioAgentSolver` | └─ **座標カンニング禁止**：占有パケットおよび隣接 6 パケットの勾配（光強度・$U_{\text{vib}}$・$\nabla U_{\text{ox}}$・気圧衝撃 $\Delta P$）のみをサンプリング<br>└─ **行動決定**：適温探索・走光性・採餌・驚愕逃避ベクトルを算出し、内部代謝エネルギーを消費して周囲パケットへの反作用（能動推力）としてエンティティ速度を更新<br>└─ **ゾーニング創発**：工場廃熱・騒音振動の流入により生物が逃避するため、川（冷却・進入阻止境界）や高さ分離の必要性が自然に発生 |
